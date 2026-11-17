@@ -1,0 +1,20 @@
+[package]
+name = "semfind-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "semfind"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+semfind-core = { path = "../semfind-core" }
+serde = "1"
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
