@@ -5,6 +5,7 @@ mod index;
 mod model;
 mod search;
 
+pub use files::FileKind;
 pub use index::{Index, IndexOptions, IndexReport, Status};
 pub use model::{Embedder, InputKind, LocalModel};
 pub use search::{Category, Hit, SearchOptions};

@@ -15,7 +15,28 @@ const MAX_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_TEXT: u64 = 512 * 1024;
 const CHUNK_SIZE: usize = 640;
 const OVERLAP: usize = 80;
-pub(crate) const TYPES: &[&str] = &["txt", "md", "markdown", "log", "csv", "rst", "pdf"];
+
+/// A group of supported file extensions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileKind {
+    Text,
+    Image,
+    Video,
+}
+
+impl FileKind {
+    pub(crate) fn from_extension(extension: &str) -> Option<Self> {
+        match extension {
+            "txt" | "md" | "markdown" | "log" | "csv" | "rst" | "pdf" => Some(Self::Text),
+            "jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp" | "tif" | "tiff" | "avif" | "heic"
+            | "heif" | "svg" => Some(Self::Image),
+            "mp4" | "m4v" | "mov" | "mkv" | "webm" | "avi" | "mpg" | "mpeg" | "wmv" | "3gp" => {
+                Some(Self::Video)
+            }
+            _ => None,
+        }
+    }
+}
 
 pub(crate) fn root(path: &Path) -> Result<PathBuf> {
     let absolute = std::path::absolute(path)?;
@@ -100,7 +121,7 @@ fn no_links(path: &Path) -> Result<bool> {
     Ok(true)
 }
 
-pub(crate) fn open_file(root: &Path, path: &Path) -> Result<File> {
+pub(crate) fn open_file(root: &Path, path: &Path, kind: FileKind) -> Result<File> {
     let relative = path.strip_prefix(root)?;
     ensure!(
         allowed(path) && !relative.as_os_str().is_empty(),
@@ -120,9 +141,10 @@ pub(crate) fn open_file(root: &Path, path: &Path) -> Result<File> {
         File::open(path)?
     };
     let metadata = file.metadata()?;
+    ensure!(metadata.is_file(), "not a regular file");
     ensure!(
-        metadata.is_file() && metadata.len() <= MAX_BYTES,
-        "not a regular file within the size limit"
+        kind != FileKind::Text || metadata.len() <= MAX_BYTES,
+        "file exceeds the 16 MiB input limit"
     );
     Ok(file)
 }

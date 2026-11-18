@@ -1,5 +1,5 @@
 use crate::{
-    files,
+    files::{self, FileKind},
     index::{Index, check_model},
     model::{Embedder, InputKind, normalized},
 };
@@ -38,6 +38,7 @@ impl Category {
 pub struct SearchOptions {
     pub path: Option<PathBuf>,
     pub extension: Option<String>,
+    pub file_kind: Option<FileKind>,
     pub category: Option<Category>,
     pub limit: usize,
 }
@@ -47,6 +48,7 @@ impl Default for SearchOptions {
         Self {
             path: None,
             extension: None,
+            file_kind: None,
             category: None,
             limit: 10,
         }
@@ -79,6 +81,7 @@ struct Candidate {
 
 impl Index {
     /// Search persisted contents with BM25, cosine similarity and reciprocal rank fusion.
+    /// An empty query lists files alphabetically when a file kind is selected.
     pub fn search(
         &self,
         query: &str,
@@ -87,8 +90,12 @@ impl Index {
     ) -> Result<Vec<Hit>> {
         let query = query.trim();
         ensure!(
-            !query.is_empty() && query.len() <= 2048 && !query.contains('\0'),
-            "query must contain 1–2048 bytes of text"
+            query.len() <= 2048 && !query.contains('\0'),
+            "query must contain at most 2048 bytes and no NUL characters"
+        );
+        ensure!(
+            !query.is_empty() || options.file_kind.is_some(),
+            "provide a query or select a file kind"
         );
         ensure!(
             (1..=100).contains(&options.limit),
@@ -120,10 +127,18 @@ impl Index {
                 let category: String = row.get(2)?;
                 let title: String = row.get(3)?;
                 let root: Option<String> = row.get(4)?;
+                let extension: Option<String> = row.get(5)?;
+                let kind = extension.as_deref().and_then(FileKind::from_extension);
+                if options.file_kind.is_some() && options.file_kind != kind {
+                    continue;
+                }
                 let file_path = if let Some(root) = root {
                     let entry = Path::new(&key);
+                    let Some(kind) = kind else {
+                        continue;
+                    };
                     if path.as_ref().is_some_and(|path| !entry.starts_with(path))
-                        || files::open_file(Path::new(&root), entry).is_err()
+                        || files::open_file(Path::new(&root), entry, kind).is_err()
                     {
                         continue;
                     }
@@ -142,7 +157,7 @@ impl Index {
                     id: key,
                     title,
                     path: file_path,
-                    extension: row.get(5)?,
+                    extension,
                     desktop: row.get(6)?,
                     setting_group: row.get(7)?,
                     category: if category == "file" {
@@ -167,6 +182,13 @@ impl Index {
         }
         if candidates.is_empty() {
             return Ok(Vec::new());
+        }
+        if query.is_empty() {
+            let mut hits: Vec<_> = candidates.into_values().map(|item| item.hit).collect();
+            hits.sort_unstable_by(|a, b| a.title.cmp(&b.title).then(a.id.cmp(&b.id)));
+            hits.truncate(options.limit);
+            tx.commit()?;
+            return Ok(hits);
         }
         let window = options.limit.saturating_mul(4).max(40);
         let mut lexical = Vec::new();
@@ -203,13 +225,10 @@ impl Index {
                 }
             }
         }
-        let mut vectors = model
-            .encode(InputKind::Query, &[query.to_owned()])
-            .context("encode query")?;
-        ensure!(vectors.len() == 1, "unexpected query embedding count");
-        let query_vector = normalized(vectors.pop().expect("one vector"))?;
         {
-            let mut statement = tx.prepare("SELECT source, id, embedding FROM chunks")?;
+            let mut query_vector: Option<Vec<f32>> = None;
+            let mut statement =
+                tx.prepare("SELECT source, id, embedding FROM chunks WHERE length(embedding) > 0")?;
             let mut rows = statement.query([])?;
             while let Some(row) = rows.next()? {
                 let Some(candidate) = candidates.get_mut(&row.get::<_, i64>(0)?) else {
@@ -217,7 +236,11 @@ impl Index {
                 };
                 let id: i64 = row.get(1)?;
                 let bytes = row.get_ref(2)?.as_blob()?;
-                let score = similarity(&query_vector, bytes)?;
+                let vector = match &query_vector {
+                    Some(vector) => vector,
+                    None => query_vector.insert(encode_query(query, model)?),
+                };
+                let score = similarity(vector, bytes)?;
                 if candidate
                     .vector_chunk
                     .is_none_or(|(prev, best)| score > best || (score == best && id < prev))
@@ -287,6 +310,14 @@ impl Index {
         tx.commit()?;
         Ok(hits)
     }
+}
+
+fn encode_query(query: &str, model: &mut impl Embedder) -> Result<Vec<f32>> {
+    let mut vectors = model
+        .encode(InputKind::Query, &[query.to_owned()])
+        .context("encode query")?;
+    ensure!(vectors.len() == 1, "unexpected query embedding count");
+    normalized(vectors.pop().expect("one vector"))
 }
 
 fn fts_expression(query: &str, identifier: bool) -> Option<String> {

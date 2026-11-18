@@ -1,6 +1,6 @@
 use crate::{
     catalog::SETTINGS,
-    files,
+    files::{self, FileKind},
     model::{Embedder, InputKind, normalized},
 };
 use anyhow::{Context, Result, ensure};
@@ -41,7 +41,7 @@ INSERT INTO fulltext(fulltext, rank) VALUES('secure-delete', 1);
 CREATE TRIGGER IF NOT EXISTS delete_chunk AFTER DELETE ON chunks BEGIN
     DELETE FROM fulltext WHERE rowid = old.id;
 END;
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;
 ";
 
 /// A persistent search index. Use one connection per client or worker.
@@ -91,7 +91,9 @@ impl Index {
         let version: i64 = tx.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         match version {
             0 => tx.execute_batch(SCHEMA)?,
-            1 => (),
+            // Version 2 also permits lexical-only chunks with an empty embedding.
+            1 => tx.pragma_update(None, "user_version", 2)?,
+            2 => (),
             _ => anyhow::bail!("unsupported database schema version {version}"),
         }
         tx.commit()?;
@@ -108,7 +110,7 @@ impl Index {
         let (files, settings, chunks) = tx.query_row(
             "SELECT (SELECT count(*) FROM sources WHERE category='file'),
                     (SELECT count(*) FROM sources WHERE category='setting'),
-                    (SELECT count(*) FROM chunks)",
+                    (SELECT count(*) FROM chunks WHERE length(embedding) > 0)",
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
@@ -243,7 +245,7 @@ fn source_state(conn: &Connection, key: &str) -> Result<Option<(i64, Vec<u8>)>> 
 fn write_source(
     tx: &Transaction<'_>,
     source: Source<'_>,
-    text: &str,
+    text: Option<&str>,
     digest: &[u8],
     model: &mut impl Embedder,
 ) -> Result<i64> {
@@ -265,6 +267,10 @@ fn write_source(
         |row| row.get(0),
     )?;
     tx.execute("DELETE FROM chunks WHERE source = ?1", [id])?;
+    let Some(text) = text else {
+        store_chunk(tx, id, &source, "", &[])?;
+        return Ok(id);
+    };
     let mut parts = files::chunks(text).peekable();
     if parts.peek().is_none() {
         write_chunks(tx, id, &source, &[""], model)?;
@@ -315,19 +321,30 @@ fn write_chunks(
             "inconsistent embedding dimensions"
         );
         let bytes: Vec<_> = vector.into_iter().flat_map(f32::to_le_bytes).collect();
-        tx.execute(
-            "INSERT INTO chunks(source, embedding) VALUES (?1, ?2)",
-            params![id, bytes],
-        )?;
-        tx.execute(
-            "INSERT INTO fulltext(rowid, title, body) VALUES (?1, ?2, ?3)",
-            params![
-                tx.last_insert_rowid(),
-                format!("{} {}", source.title, source.key),
-                text
-            ],
-        )?;
+        store_chunk(tx, id, source, text, &bytes)?;
     }
+    Ok(())
+}
+
+fn store_chunk(
+    tx: &Transaction<'_>,
+    id: i64,
+    source: &Source<'_>,
+    text: &str,
+    embedding: &[u8],
+) -> Result<()> {
+    tx.execute(
+        "INSERT INTO chunks(source, embedding) VALUES (?1, ?2)",
+        params![id, embedding],
+    )?;
+    tx.execute(
+        "INSERT INTO fulltext(rowid, title, body) VALUES (?1, ?2, ?3)",
+        params![
+            tx.last_insert_rowid(),
+            format!("{} {}", source.title, source.key),
+            text
+        ],
+    )?;
     Ok(())
 }
 
@@ -357,7 +374,7 @@ fn synchronize_catalog(
                 desktop: Some("cosmic"),
                 setting_group: Some(setting.group),
             },
-            &text,
+            Some(&text),
             &digest,
             model,
         )?);
@@ -417,31 +434,43 @@ fn synchronize_files(
         else {
             continue;
         };
-        if !files::TYPES.contains(&extension.as_str()) {
+        let Some(kind) = FileKind::from_extension(&extension) else {
             continue;
-        }
+        };
         let key = path.to_str().context("file paths must be valid UTF-8")?;
         let title = entry
             .file_name()
             .to_str()
             .context("file names must be valid UTF-8")?;
-        let bytes = match files::open_file(root, path).and_then(files::read) {
+        let bytes = match files::open_file(root, path, kind).and_then(|file| {
+            if kind == FileKind::Text {
+                files::read(file).map(Some)
+            } else {
+                Ok(None)
+            }
+        }) {
             Ok(bytes) => bytes,
             Err(error) => {
                 warn(report, path, &error);
                 continue;
             }
         };
-        let digest = Sha256::new()
-            .chain_update(b"extract-v1\0")
-            .chain_update(&bytes)
-            .finalize();
+        let digest = match &bytes {
+            Some(bytes) => Sha256::new()
+                .chain_update(b"extract-v1\0")
+                .chain_update(bytes)
+                .finalize(),
+            None => Sha256::digest(b"file-name-v1"),
+        };
         let stored = source_state(tx, key)?;
         let id = if let Some((id, _)) = stored.filter(|(_, saved)| saved == digest.as_slice()) {
             report.unchanged += 1;
             id
         } else {
-            let text = match files::extract(&extension, bytes) {
+            let text = match bytes
+                .map(|bytes| files::extract(&extension, bytes))
+                .transpose()
+            {
                 Ok(text) => text,
                 Err(error) => {
                     warn(report, path, &error);
@@ -459,7 +488,7 @@ fn synchronize_files(
                     desktop: None,
                     setting_group: None,
                 },
-                &text,
+                text.as_deref(),
                 &digest,
                 model,
             )?;

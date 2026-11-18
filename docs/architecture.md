@@ -17,7 +17,7 @@ Extracted text is broken at nearby word boundaries, up to 640 Unicode characters
 
 ## Read path
 
-Path, extension and category define the result set. The index confirms that each file still opens under its registered root before considering its saved contents. FTS5 ranks escaped terms with BM25. Cosine similarity ranks stored vectors, taking the best passage per source in each retrieval channel. Reciprocal Rank Fusion combines the top candidates from each list with k = 60. Full path, filename and settings ID matches rank first, then literal code matches in passages. Remaining ties are deterministic. Semantic ranking uses relative similarity, so an unrelated query can still return candidates.
+Path, extension, file kind and result category define the result set. The index confirms that each file still opens under its registered root before considering its saved contents. FTS5 ranks escaped terms with BM25. Cosine similarity ranks stored vectors, taking the best passage per source in each retrieval channel. Image and video records have an FTS5 row for their filename and path and an empty vector field. Reciprocal Rank Fusion combines the top candidates from each list with k = 60. Full path, filename and settings ID matches rank first, then literal code matches in passages. Remaining ties are deterministic. Semantic ranking uses relative similarity, so an unrelated query can still return candidates.
 
 ## Trade-offs
 

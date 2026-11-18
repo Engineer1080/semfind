@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand, ValueEnum};
-use semfind_core::{Category, Index, IndexOptions, LocalModel, SearchOptions};
+use semfind_core::{Category, FileKind, Index, IndexOptions, LocalModel, SearchOptions};
 use std::{
     env,
     io::{self, Write},
@@ -52,8 +52,11 @@ enum Command {
 
 #[derive(clap::Args)]
 struct Search {
-    /// A query in natural language, a file name, an identifier or an error code.
+    /// A query, file name or identifier. Omit when listing files with --kind.
     query: Option<String>,
+    /// Restrict results to a group of file formats.
+    #[arg(long = "kind", value_enum)]
+    file_kind: Option<KindFilter>,
     #[arg(long = "type")]
     extension: Option<String>,
     #[arg(long)]
@@ -64,6 +67,25 @@ struct Search {
     limit: u32,
     #[arg(long)]
     json: bool,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum KindFilter {
+    Text,
+    #[value(alias = "images")]
+    Image,
+    #[value(alias = "videos")]
+    Video,
+}
+
+impl From<KindFilter> for FileKind {
+    fn from(value: KindFilter) -> Self {
+        match value {
+            KindFilter::Text => Self::Text,
+            KindFilter::Image => Self::Image,
+            KindFilter::Video => Self::Video,
+        }
+    }
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -91,21 +113,22 @@ impl From<Filter> for Category {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    if cli.command.is_none() && cli.search.query.is_none() {
+    if cli.command.is_none() && cli.search.query.is_none() && cli.search.file_kind.is_none() {
         use clap::CommandFactory;
         Cli::command()
             .error(
                 clap::error::ErrorKind::MissingRequiredArgument,
-                "provide a query or a subcommand",
+                "provide a query, --kind or a subcommand",
             )
             .exit();
     }
-    if matches!(&cli.command, Some(Command::Search(search)) if search.query.is_none()) {
+    if matches!(&cli.command, Some(Command::Search(search)) if search.query.is_none() && search.file_kind.is_none())
+    {
         use clap::CommandFactory;
         Cli::command()
             .error(
                 clap::error::ErrorKind::MissingRequiredArgument,
-                "provide a query",
+                "provide a query or --kind",
             )
             .exit();
     }
@@ -196,12 +219,12 @@ fn run_search(
     start_model: impl FnOnce() -> Result<LocalModel>,
     output: &mut impl Write,
 ) -> Result<()> {
-    let query = search.query.context("provide a query")?;
     let hits = index.search(
-        &query,
+        search.query.as_deref().unwrap_or_default(),
         &SearchOptions {
             path: search.path,
             extension: search.extension,
+            file_kind: search.file_kind.map(Into::into),
             category: search.category.map(Into::into),
             limit: search.limit as usize,
         },

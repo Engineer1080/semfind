@@ -68,6 +68,9 @@ fn real_model_searches_across_languages_and_indexes_pdf() -> Result<()> {
         root.join("c.pdf"),
         pdf("Workshop report: ERROR E-0042. The pump outlet was blocked."),
     )?;
+    fs::write(root.join("workshop.png"), b"metadata-only image fixture")?;
+    fs::write(root.join("workshop.jpg"), b"metadata-only image fixture")?;
+    fs::write(root.join("workshop.mp4"), b"metadata-only video fixture")?;
     success(cli(&index).arg("index").arg(&root).output()?)?;
     let search = |args: &[&str]| -> Result<Vec<Hit>> {
         let result = success(cli(&index).args(args).arg("--json").output()?)?;
@@ -92,6 +95,17 @@ fn real_model_searches_across_languages_and_indexes_pdf() -> Result<()> {
     let pdf = search(&["E-0042", "--type", "pdf", "--limit", "1"])?;
     assert_eq!(pdf[0].title, "c.pdf");
     assert!(pdf[0].exact && pdf[0].snippet.contains("pump outlet"));
+    let images = search(&["--kind", "image"])?;
+    assert_eq!(
+        images
+            .iter()
+            .map(|hit| hit.title.as_str())
+            .collect::<Vec<_>>(),
+        ["workshop.jpg", "workshop.png"]
+    );
+    let videos = search(&["workshop", "--kind", "video"])?;
+    assert_eq!(videos.len(), 1);
+    assert_eq!(videos[0].title, "workshop.mp4");
     let settings = search(&[
         "Mein Bildschirm ist zu dunkel",
         "--category",

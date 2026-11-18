@@ -9,7 +9,7 @@ Linux filename search helps when you know what a file is called. Full-text searc
 - Manual indexing of selected directories and a curated, bilingual COSMIC settings catalog.
 - Search across UTF-8 text, Markdown, logs, CSV, reStructuredText, and PDFs with a text layer.
 - Local multilingual E5 embeddings, SQLite FTS5, and hybrid ranking with one result per file or setting.
-- Filters for folder, file extension, and category. JSON for scripting.
+- Filters for folder, file extension, file kind (text, image, video), and result category. JSON for scripting.
 - Incremental rescans that recalculate embeddings only for changed content. Saved directory exclusions and manual index removal.
 
 The target desktop is Pop!_OS 24.04 with COSMIC. The CLI works independently of the desktop. See [verification](docs/verification.md) for the environments exercised.
@@ -40,6 +40,14 @@ semfind "Mein Bildschirm ist zu dunkel" --category settings
 semfind "E-0042" --type log --json
 semfind status --json
 ```
+
+```bash
+semfind "Sommerurlaub" --kind image
+semfind --kind video --path "$HOME/Videos"
+semfind "Datenschutz" --kind text --type pdf
+```
+
+`--kind` groups file extensions and can list indexed files without a query. Images and videos are searchable by filename and path. Their visual and audio contents are outside the current index. Rescan your indexed folders to include images and videos.
 
 ```bash
 semfind index "$HOME/Documents" --exclude Private --exclude Archive/taxes

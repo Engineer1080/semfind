@@ -1,5 +1,5 @@
 use anyhow::{Result, bail};
-use semfind_core::{Category, Embedder, Index, IndexOptions, InputKind, SearchOptions};
+use semfind_core::{Category, Embedder, FileKind, Index, IndexOptions, InputKind, SearchOptions};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -150,6 +150,71 @@ fn rescans_skip_unchanged_passages_and_roll_back_failed_changes() -> Result<()> 
     assert!(index.remove_root(&root)?);
     let status = index.status()?;
     assert_eq!((status.files, status.settings, status.chunks), (0, 5, 5));
+    Ok(())
+}
+
+#[test]
+fn file_kind_filters_list_multiple_formats_and_search_media_names() -> Result<()> {
+    let (temp, mut index, root, mut model) = new_fixture()?;
+    fixture(&root, "garden.txt", "Summer flowers")?;
+    index.synchronize(Some(&root), &IndexOptions::default(), &mut model)?;
+    drop(index);
+    let index_dir = temp.path().join("index");
+    // Emulate a v1 database containing text and catalog entries.
+    let db = rusqlite::Connection::open(index_dir.join("index.sqlite3"))?;
+    db.pragma_update(None, "user_version", 1)?;
+    drop(db);
+    let mut index = Index::open(&index_dir)?;
+    assert_eq!(index.status()?.files, 1);
+    fixture(&root, "garden.JPG", "hiddenmarker")?;
+    fixture(&root, "garden.PNG", "other image bytes")?;
+    fixture(&root, "clips/garden.webm", "video bytes")?;
+    let large_video = fs::File::create(root.join("clips/garden.mp4"))?;
+    large_video.set_len(17 * 1024 * 1024)?;
+    drop(large_video);
+    fixture(&root, "garden.zip", "unsupported")?;
+    fixture(&root, ".private/garden.png", "excluded")?;
+    index.synchronize(Some(&root), &IndexOptions::default(), &mut model)?;
+    let status = index.status()?;
+    assert_eq!((status.files, status.chunks, model.passages), (5, 6, 6));
+    drop(index);
+    let mut index = Index::open(&temp.path().join("index"))?;
+    for (kind, expected) in [
+        (FileKind::Text, vec!["txt"]),
+        (FileKind::Image, vec!["jpg", "png"]),
+        (FileKind::Video, vec!["mp4", "webm"]),
+    ] {
+        let filters = SearchOptions {
+            file_kind: Some(kind),
+            ..Default::default()
+        };
+        let listed = index.search("", &filters, &mut model)?;
+        let extensions: Vec<_> = listed
+            .iter()
+            .filter_map(|hit| hit.extension.as_deref())
+            .collect();
+        assert_eq!(extensions, expected);
+        assert_eq!(
+            index.search("garden", &filters, &mut model)?.len(),
+            expected.len()
+        );
+    }
+    let mut jpg = SearchOptions {
+        extension: Some(".JPG".into()),
+        file_kind: Some(FileKind::Image),
+        ..Default::default()
+    };
+    assert!(index.search("hiddenmarker", &jpg, &mut model)?.is_empty());
+    let results = index.search("garden.JPG", &jpg, &mut model)?;
+    assert_eq!(results.len(), 1);
+    assert!(results[0].exact && results[0].snippet.is_empty());
+    fs::remove_file(root.join("garden.JPG"))?;
+    assert!(index.search("garden.JPG", &jpg, &mut model)?.is_empty());
+    index.synchronize(Some(&root), &IndexOptions::default(), &mut model)?;
+    assert_eq!(index.status()?.files, 4);
+    assert_eq!(model.passages, 6);
+    jpg.file_kind = Some(FileKind::Video);
+    assert!(index.search("", &jpg, &mut model)?.is_empty());
     Ok(())
 }
 
