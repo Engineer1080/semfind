@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3
+
+- Added `semfind init` on Linux to index supported files in the home directory, registered desktop applications, and COSMIC settings in one command. Run it again to refresh all three and reuse saved home exclusions.
+- Desktop applications are searchable with `--category application` by name, desktop file ID, descriptions, and keywords, including German and English translations when available.
+- `semfind status` now reports the application count. Existing indexes migrate automatically and retain their indexed files, settings, and saved exclusions.
+
 ## 0.1.2
 
 - File listings and searches filtered to images or videos run without starting Python or loading the embedding model.

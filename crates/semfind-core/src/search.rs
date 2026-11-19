@@ -55,7 +55,7 @@ impl Default for SearchOptions {
     }
 }
 
-/// One result per file or setting. File IDs are absolute paths.
+/// One result per indexed source. File IDs are absolute paths.
 /// The fused score is a ranking signal and has no probability interpretation.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Hit {
@@ -187,10 +187,11 @@ impl Index {
                     extension,
                     desktop: row.get(6)?,
                     setting_group: row.get(7)?,
-                    category: if category == "file" {
-                        Category::File
-                    } else {
-                        Category::Setting
+                    category: match category.as_str() {
+                        "file" => Category::File,
+                        "setting" => Category::Setting,
+                        "application" => Category::Application,
+                        _ => anyhow::bail!("unsupported source category {category}"),
                     },
                     score: 0.0,
                     snippet: String::new(),

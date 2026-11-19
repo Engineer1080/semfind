@@ -1,4 +1,5 @@
 //! Persistent, local hybrid search across documents and desktop settings.
+mod applications;
 mod catalog;
 mod files;
 mod index;

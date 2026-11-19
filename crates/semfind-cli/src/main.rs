@@ -1,6 +1,8 @@
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand, ValueEnum};
-use semfind_core::{Category, FileKind, Index, IndexOptions, LocalModel, SearchOptions};
+use semfind_core::{
+    Category, FileKind, Index, IndexOptions, IndexReport, LocalModel, SearchOptions,
+};
 use std::{
     env,
     io::{self, Write},
@@ -29,6 +31,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Index the home directory, installed desktop applications and COSMIC settings.
+    Init {
+        /// Exclude a directory or file by name or by a path relative to HOME.
+        #[arg(long)]
+        exclude: Vec<PathBuf>,
+        /// Remove the saved exclusions for HOME.
+        #[arg(long, conflicts_with = "exclude")]
+        clear_excludes: bool,
+    },
     /// Synchronize one directory and the settings catalog. Omit the root for settings only.
     Index {
         root: Option<PathBuf>,
@@ -171,8 +182,8 @@ fn run(cli: Cli, output: &mut impl Write) -> Result<()> {
             }
             writeln!(
                 output,
-                "Files: {} | Settings: {} | Passages: {}",
-                status.files, status.settings, status.chunks
+                "Files: {} | Settings: {} | Applications: {} | Passages: {}",
+                status.files, status.settings, status.applications, status.chunks
             )?;
             for root in status.roots {
                 writeln!(output, "Root: {}", root.display())?;
@@ -186,6 +197,20 @@ fn run(cli: Cli, output: &mut impl Write) -> Result<()> {
             );
             writeln!(output, "Removed {}", root.display())?;
         }
+        Some(Command::Init {
+            exclude,
+            clear_excludes,
+        }) => {
+            let home = env::var_os("HOME").context("HOME is required for init")?;
+            let report = index.initialize_home(
+                Path::new(&home),
+                &IndexOptions {
+                    exclude: (clear_excludes || !exclude.is_empty()).then_some(exclude),
+                },
+                &mut start_model()?,
+            )?;
+            print_index_report(output, &report)?;
+        }
         Some(Command::Index {
             root,
             exclude,
@@ -198,18 +223,23 @@ fn run(cli: Cli, output: &mut impl Write) -> Result<()> {
                 },
                 &mut start_model()?,
             )?;
-            for warning in &report.warnings {
-                eprintln!("semfind: skipped {warning}");
-            }
-            writeln!(
-                output,
-                "Written: {} | Unchanged: {} | Removed: {} | Skipped: {}",
-                report.written, report.unchanged, report.removed, report.skipped
-            )?;
+            print_index_report(output, &report)?;
         }
         Some(Command::Search(search)) => run_search(&index, search, start_model, output)?,
         None => run_search(&index, cli.search, start_model, output)?,
     }
+    Ok(())
+}
+
+fn print_index_report(output: &mut impl Write, report: &IndexReport) -> Result<()> {
+    for warning in &report.warnings {
+        eprintln!("semfind: skipped {warning}");
+    }
+    writeln!(
+        output,
+        "Written: {} | Unchanged: {} | Removed: {} | Skipped: {}",
+        report.written, report.unchanged, report.removed, report.skipped
+    )?;
     Ok(())
 }
 

@@ -1,5 +1,5 @@
 use anyhow::{Result, ensure};
-use semfind_core::Hit;
+use semfind_core::{Category, Hit};
 use std::{
     env, fs,
     path::Path,
@@ -42,6 +42,82 @@ fn status_json_and_usage_exit_codes() -> Result<()> {
             .code(),
         Some(1)
     );
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires a local model and Python environment"]
+fn real_model_init_indexes_home_and_refreshes_desktop_applications() -> Result<()> {
+    let temp = tempfile::Builder::new().prefix("semfind-init-").tempdir()?;
+    let index = temp.path().join("index");
+    let home = temp.path().join("home");
+    let user_apps = home.join(".local/share/applications");
+    let system_data = temp.path().join("system-share");
+    let system_apps = system_data.join("applications");
+    fs::create_dir_all(&user_apps)?;
+    fs::create_dir_all(&system_apps)?;
+    fs::create_dir(home.join("Private"))?;
+    fs::write(home.join("notes.txt"), "Document available for search")?;
+    fs::write(home.join("Private/secret.txt"), "Excluded document")?;
+    fs::write(
+        system_apps.join("viewer.desktop"),
+        "[Desktop Entry]\nType=Application\nName=System Viewer\n",
+    )?;
+    fs::write(
+        user_apps.join("viewer.desktop"),
+        "[Desktop Entry]\nType=Application\nName=My Viewer\nGenericName[de]=Bildbetrachter\nKeywords=screenshot;photo;\nOnlyShowIn=COSMIC;\n",
+    )?;
+    fs::write(
+        system_apps.join("hidden.desktop"),
+        "[Desktop Entry]\nType=Application\nName=Hidden Viewer\n",
+    )?;
+    fs::write(
+        user_apps.join("hidden.desktop"),
+        "[Desktop Entry]\nHidden=true\n",
+    )?;
+    fs::write(
+        system_apps.join("other.desktop"),
+        "[Desktop Entry]\nType=Application\nName=Other Viewer\nNotShowIn=COSMIC;\n",
+    )?;
+    let run = |args: &[&str]| -> Result<Vec<u8>> {
+        success(
+            cli(&index)
+                .env_remove("XDG_DATA_HOME")
+                .env("HOME", &home)
+                .env("XDG_DATA_DIRS", &system_data)
+                .env("XDG_CURRENT_DESKTOP", "COSMIC")
+                .args(args)
+                .output()?,
+        )
+    };
+    run(&["init", "--exclude", "Private"])?;
+    let status: serde_json::Value = serde_json::from_slice(&run(&["status", "--json"])?)?;
+    assert_eq!(status["roots"], serde_json::json!([home]));
+    assert_eq!(status["files"], 1, "{status}");
+    assert_eq!(status["applications"], 1, "{status}");
+    assert_eq!(status["settings"], 5, "{status}");
+    let hits: Vec<Hit> = serde_json::from_slice(&run(&[
+        "Bildbetrachter",
+        "--category",
+        "application",
+        "--json",
+    ])?)?;
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].category, Category::Application);
+    assert_eq!(hits[0].id, "viewer.desktop");
+    assert_eq!(hits[0].title, "My Viewer");
+
+    fs::remove_file(user_apps.join("viewer.desktop"))?;
+    fs::remove_file(system_apps.join("viewer.desktop"))?;
+    let report = String::from_utf8(run(&["init"])?)?;
+    assert!(
+        report.contains("Written: 0 | Unchanged: 6 | Removed: 1"),
+        "{report}"
+    );
+    let status: serde_json::Value = serde_json::from_slice(&run(&["status", "--json"])?)?;
+    assert_eq!(status["files"], 1, "{status}");
+    assert_eq!(status["applications"], 0, "{status}");
     Ok(())
 }
 

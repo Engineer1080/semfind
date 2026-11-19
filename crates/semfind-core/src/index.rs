@@ -1,4 +1,5 @@
 use crate::{
+    applications::{self, Application},
     catalog::SETTINGS,
     files::{self, FileKind},
     model::{Embedder, InputKind, normalized},
@@ -13,20 +14,19 @@ use std::{
 };
 use walkdir::WalkDir;
 
-const SCHEMA: &str = "
-CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS roots (path TEXT PRIMARY KEY, exclusions TEXT NOT NULL DEFAULT '[]');
-CREATE TABLE IF NOT EXISTS sources (
+const SOURCE_COLUMNS: &str = "(
     id INTEGER PRIMARY KEY,
     key TEXT UNIQUE NOT NULL,
-    category TEXT NOT NULL CHECK (category IN ('file', 'setting')),
+    category TEXT NOT NULL CHECK (category IN ('file', 'setting', 'application')),
     title TEXT NOT NULL,
     root TEXT REFERENCES roots(path) ON DELETE CASCADE,
     extension TEXT,
     desktop TEXT,
     setting_group TEXT,
     digest BLOB NOT NULL
-);
+)";
+
+const SCHEMA: &str = "
 CREATE INDEX IF NOT EXISTS sources_root ON sources(root);
 CREATE TABLE IF NOT EXISTS chunks (
     id INTEGER PRIMARY KEY,
@@ -41,7 +41,7 @@ INSERT INTO fulltext(fulltext, rank) VALUES('secure-delete', 1);
 CREATE TRIGGER IF NOT EXISTS delete_chunk AFTER DELETE ON chunks BEGIN
     DELETE FROM fulltext WHERE rowid = old.id;
 END;
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;
 ";
 
 /// A persistent search index. Use one connection per client or worker.
@@ -73,6 +73,7 @@ pub struct Status {
     pub roots: Vec<PathBuf>,
     pub files: i64,
     pub settings: i64,
+    pub applications: i64,
     pub chunks: i64,
     pub model: Option<String>,
 }
@@ -89,19 +90,8 @@ impl Index {
         )?;
         let version = schema_version(&conn)?;
         match version {
-            0 | 1 => {
-                let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-                // Another process may have migrated the index while we waited for the lock.
-                match schema_version(&tx)? {
-                    0 => tx.execute_batch(SCHEMA)?,
-                    // Version 2 also permits lexical-only chunks with an empty embedding.
-                    1 => tx.pragma_update(None, "user_version", 2)?,
-                    2 => (),
-                    version => anyhow::bail!("unsupported database schema version {version}"),
-                }
-                tx.commit()?;
-            }
-            2 => (),
+            0..=2 => migrate(&mut conn)?,
+            3 => (),
             _ => anyhow::bail!("unsupported database schema version {version}"),
         }
         Ok(Self { conn })
@@ -114,12 +104,13 @@ impl Index {
             .prepare("SELECT path FROM roots ORDER BY path")?
             .query_map([], |row| Ok(PathBuf::from(row.get::<_, String>(0)?)))?
             .collect::<rusqlite::Result<_>>()?;
-        let (files, settings, chunks) = tx.query_row(
+        let (files, settings, applications, chunks) = tx.query_row(
             "SELECT (SELECT count(*) FROM sources WHERE category='file'),
                     (SELECT count(*) FROM sources WHERE category='setting'),
+                    (SELECT count(*) FROM sources WHERE category='application'),
                     (SELECT count(*) FROM chunks WHERE length(embedding) > 0)",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )?;
         let model = model_identity(&tx)?;
         tx.commit()?;
@@ -127,6 +118,7 @@ impl Index {
             roots,
             files,
             settings,
+            applications,
             chunks,
             model,
         })
@@ -138,6 +130,28 @@ impl Index {
         &mut self,
         root: Option<&Path>,
         options: &IndexOptions,
+        model: &mut impl Embedder,
+    ) -> Result<IndexReport> {
+        self.synchronize_sources(root, options, false, model)
+    }
+
+    /// Synchronize the home directory, installed desktop applications and the settings catalog.
+    pub fn initialize_home(
+        &mut self,
+        home: &Path,
+        options: &IndexOptions,
+        model: &mut impl Embedder,
+    ) -> Result<IndexReport> {
+        ensure!(cfg!(target_os = "linux"), "init is supported on Linux");
+        ensure!(home.is_absolute(), "HOME must be an absolute path");
+        self.synchronize_sources(Some(home), options, true, model)
+    }
+
+    fn synchronize_sources(
+        &mut self,
+        root: Option<&Path>,
+        options: &IndexOptions,
+        include_applications: bool,
         model: &mut impl Embedder,
     ) -> Result<IndexReport> {
         ensure!(
@@ -170,12 +184,16 @@ impl Index {
                 .prepare("SELECT path FROM roots WHERE path != ?1")?
                 .query_map([name], |row| row.get::<_, String>(0))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
-            ensure!(
-                existing
-                    .iter()
-                    .all(|p| !root.starts_with(p) && !Path::new(p).starts_with(&root)),
-                "index roots must not overlap"
-            );
+            if let Some(conflict) = existing
+                .iter()
+                .find(|p| root.starts_with(p) || Path::new(p).starts_with(&root))
+            {
+                anyhow::bail!(
+                    "index roots must not overlap: {} conflicts with already indexed {}",
+                    root.display(),
+                    conflict
+                );
+            }
             tx.execute("INSERT OR IGNORE INTO roots(path) VALUES (?1)", [name])?;
             let exclusions = if let Some(exclusions) = &options.exclude {
                 tx.execute(
@@ -192,6 +210,10 @@ impl Index {
                 serde_json::from_str(&encoded)?
             };
             synchronize_files(&tx, &root, name, &exclusions, model, &mut report)?;
+            if include_applications {
+                let applications = applications::discover(&root)?;
+                synchronize_applications(&tx, &applications, model, &mut report)?;
+            }
         }
         tx.commit()?;
         Ok(report)
@@ -210,6 +232,42 @@ impl Index {
 
 fn schema_version(conn: &Connection) -> rusqlite::Result<i64> {
     conn.query_row("PRAGMA user_version", [], |row| row.get(0))
+}
+
+fn migrate(conn: &mut Connection) -> Result<()> {
+    // Copy the parent table while preserving the chunks and their FTS rows.
+    conn.pragma_update(None, "foreign_keys", false)?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    // Another process may have migrated the index while we waited for the lock.
+    match schema_version(&tx)? {
+        0 => tx.execute_batch(&format!(
+            "CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS roots (path TEXT PRIMARY KEY, exclusions TEXT NOT NULL DEFAULT '[]');
+             CREATE TABLE IF NOT EXISTS sources {SOURCE_COLUMNS};
+             {SCHEMA}"
+        ))?,
+        1 | 2 => {
+            tx.execute_batch(&format!(
+                "CREATE TABLE sources_new {SOURCE_COLUMNS};
+                 INSERT INTO sources_new SELECT * FROM sources;
+                 DROP TABLE sources;
+                 ALTER TABLE sources_new RENAME TO sources;
+                 CREATE INDEX sources_root ON sources(root);
+                 PRAGMA user_version = 3;"
+            ))?;
+            let invalid: bool = tx.query_row(
+                "SELECT EXISTS (SELECT 1 FROM pragma_foreign_key_check)",
+                [],
+                |row| row.get(0),
+            )?;
+            ensure!(!invalid, "index contains invalid foreign keys");
+        }
+        3 => (),
+        version => anyhow::bail!("unsupported database schema version {version}"),
+    }
+    tx.commit()?;
+    conn.pragma_update(None, "foreign_keys", true)?;
+    Ok(())
 }
 
 pub(crate) fn check_model(conn: &Connection, model: &impl Embedder) -> Result<()> {
@@ -391,9 +449,53 @@ fn synchronize_catalog(
         )?);
         report.written += 1;
     }
+    remove_missing_sources(tx, "setting", &keep, report)
+}
+
+fn synchronize_applications(
+    tx: &Transaction<'_>,
+    applications: &[Application],
+    model: &mut impl Embedder,
+    report: &mut IndexReport,
+) -> Result<()> {
+    let mut keep = Vec::new();
+    for app in applications {
+        let digest = Sha256::digest(format!("application-v1\n{}\n{}", app.name, app.text));
+        let stored = source_state(tx, &app.id)?;
+        if let Some((id, _)) = stored.filter(|(_, saved)| saved == digest.as_slice()) {
+            keep.push(id);
+            report.unchanged += 1;
+            continue;
+        }
+        keep.push(write_source(
+            tx,
+            Source {
+                key: &app.id,
+                category: "application",
+                title: &app.name,
+                root: None,
+                extension: None,
+                desktop: None,
+                setting_group: None,
+            },
+            Some(&app.text),
+            &digest,
+            model,
+        )?);
+        report.written += 1;
+    }
+    remove_missing_sources(tx, "application", &keep, report)
+}
+
+fn remove_missing_sources(
+    tx: &Transaction<'_>,
+    category: &str,
+    keep: &[i64],
+    report: &mut IndexReport,
+) -> Result<()> {
     let ids = tx
-        .prepare("SELECT id FROM sources WHERE category = 'setting'")?
-        .query_map([], |row| row.get::<_, i64>(0))?
+        .prepare("SELECT id FROM sources WHERE category = ?1")?
+        .query_map([category], |row| row.get::<_, i64>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     for id in ids.into_iter().filter(|id| !keep.contains(id)) {
         report.removed += tx.execute("DELETE FROM sources WHERE id = ?1", [id])?;
