@@ -4,7 +4,7 @@ use crate::{
     model::{Embedder, InputKind, normalized},
 };
 use anyhow::{Context, Result, ensure};
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -79,6 +79,11 @@ struct Candidate {
     exact_chunk: Option<i64>,
 }
 
+struct QueryEmbedding {
+    vector: Vec<f32>,
+    minimum_similarity: Option<f32>,
+}
+
 impl Index {
     /// Search persisted contents with BM25, cosine similarity and reciprocal rank fusion.
     /// An empty query lists files alphabetically when a file kind is selected.
@@ -87,6 +92,29 @@ impl Index {
         query: &str,
         options: &SearchOptions,
         model: &mut impl Embedder,
+    ) -> Result<Vec<Hit>> {
+        self.search_with_encoder(query, options, |conn, query| {
+            encode_query(conn, query, model)
+        })
+    }
+
+    /// Search with an encoder that is created only when eligible passages have embeddings.
+    pub fn search_with_model<M: Embedder>(
+        &self,
+        query: &str,
+        options: &SearchOptions,
+        start_model: impl FnOnce() -> Result<M>,
+    ) -> Result<Vec<Hit>> {
+        self.search_with_encoder(query, options, |conn, query| {
+            encode_query(conn, query, &mut start_model()?)
+        })
+    }
+
+    fn search_with_encoder(
+        &self,
+        query: &str,
+        options: &SearchOptions,
+        encode: impl FnOnce(&Connection, &str) -> Result<QueryEmbedding>,
     ) -> Result<Vec<Hit>> {
         let query = query.trim();
         ensure!(
@@ -111,7 +139,6 @@ impl Index {
             "file type cannot be empty"
         );
         let tx = self.conn.unchecked_transaction()?;
-        check_model(&tx, model)?;
         let mut candidates = HashMap::new();
         let needle = query.to_lowercase();
         {
@@ -225,8 +252,12 @@ impl Index {
                 }
             }
         }
-        {
-            let mut query_vector: Option<Vec<f32>> = None;
+        let file_kind = options
+            .file_kind
+            .or_else(|| extension.as_deref().and_then(FileKind::from_extension));
+        if !matches!(file_kind, Some(FileKind::Image | FileKind::Video)) {
+            let mut encode = Some(encode);
+            let mut query_embedding = None;
             let mut statement =
                 tx.prepare("SELECT source, id, embedding FROM chunks WHERE length(embedding) > 0")?;
             let mut rows = statement.query([])?;
@@ -236,14 +267,17 @@ impl Index {
                 };
                 let id: i64 = row.get(1)?;
                 let bytes = row.get_ref(2)?.as_blob()?;
-                let vector = match &query_vector {
-                    Some(vector) => vector,
-                    None => query_vector.insert(encode_query(query, model)?),
+                let embedding = match &query_embedding {
+                    Some(embedding) => embedding,
+                    None => {
+                        query_embedding.insert(encode.take().expect("first embedding")(&tx, query)?)
+                    }
                 };
-                let score = similarity(vector, bytes)?;
-                if candidate
-                    .vector_chunk
-                    .is_none_or(|(prev, best)| score > best || (score == best && id < prev))
+                let score = similarity(&embedding.vector, bytes)?;
+                if embedding.minimum_similarity.is_none_or(|min| score >= min)
+                    && candidate
+                        .vector_chunk
+                        .is_none_or(|(prev, best)| score > best || (score == best && id < prev))
                 {
                     candidate.vector_chunk = Some((id, score));
                 }
@@ -312,12 +346,20 @@ impl Index {
     }
 }
 
-fn encode_query(query: &str, model: &mut impl Embedder) -> Result<Vec<f32>> {
+fn encode_query(
+    conn: &Connection,
+    query: &str,
+    model: &mut impl Embedder,
+) -> Result<QueryEmbedding> {
+    check_model(conn, model)?;
     let mut vectors = model
         .encode(InputKind::Query, &[query.to_owned()])
         .context("encode query")?;
     ensure!(vectors.len() == 1, "unexpected query embedding count");
-    normalized(vectors.pop().expect("one vector"))
+    Ok(QueryEmbedding {
+        vector: normalized(vectors.pop().expect("one vector"))?,
+        minimum_similarity: model.minimum_similarity(),
+    })
 }
 
 fn fts_expression(query: &str, identifier: bool) -> Option<String> {

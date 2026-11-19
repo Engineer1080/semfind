@@ -65,6 +65,10 @@ fn real_model_searches_across_languages_and_indexes_pdf() -> Result<()> {
         "Mix flour, yeast and water, then bake the dough in a hot oven to make bread.",
     )?;
     fs::write(
+        root.join("data-retention.md"),
+        include_str!("../../../examples/documents/data-retention.md"),
+    )?;
+    fs::write(
         root.join("c.pdf"),
         pdf("Workshop report: ERROR E-0042. The pump outlet was blocked."),
     )?;
@@ -95,7 +99,19 @@ fn real_model_searches_across_languages_and_indexes_pdf() -> Result<()> {
     let pdf = search(&["E-0042", "--type", "pdf", "--limit", "1"])?;
     assert_eq!(pdf[0].title, "c.pdf");
     assert!(pdf[0].exact && pdf[0].snippet.contains("pump outlet"));
-    let images = search(&["--kind", "image"])?;
+    let missing_python = temp.path().join("missing-python");
+    let media_search = |args: &[&str]| -> Result<Vec<Hit>> {
+        let result = success(
+            cli(&index)
+                .arg("--python")
+                .arg(&missing_python)
+                .args(args)
+                .arg("--json")
+                .output()?,
+        )?;
+        Ok(serde_json::from_slice(&result)?)
+    };
+    let images = media_search(&["--kind", "image"])?;
     assert_eq!(
         images
             .iter()
@@ -103,9 +119,13 @@ fn real_model_searches_across_languages_and_indexes_pdf() -> Result<()> {
             .collect::<Vec<_>>(),
         ["workshop.jpg", "workshop.png"]
     );
-    let videos = search(&["workshop", "--kind", "video"])?;
+    let videos = media_search(&["workshop", "--kind", "video"])?;
     assert_eq!(videos.len(), 1);
     assert_eq!(videos[0].title, "workshop.mp4");
+    assert_eq!(
+        media_search(&["workshop", "--type", "mp4"])?[0].title,
+        "workshop.mp4"
+    );
     let settings = search(&[
         "Mein Bildschirm ist zu dunkel",
         "--category",
@@ -114,6 +134,21 @@ fn real_model_searches_across_languages_and_indexes_pdf() -> Result<()> {
         "1",
     ])?;
     assert_eq!(settings[0].id, "display.brightness");
+    let retention = search(&[
+        "Wie lange sollen personenbezogene Daten gespeichert werden?",
+        "--type",
+        "md",
+    ])?;
+    assert_eq!(retention[0].title, "data-retention.md");
+    for unrelated in [
+        "neutrino spectroscopy orbital decay",
+        "Schwarze Löcher in der Milchstraße",
+    ] {
+        assert!(
+            search(&[unrelated, "--type", "md"])?.is_empty(),
+            "{unrelated}"
+        );
+    }
     Ok(())
 }
 

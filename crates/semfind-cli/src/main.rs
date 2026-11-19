@@ -219,7 +219,7 @@ fn run_search(
     start_model: impl FnOnce() -> Result<LocalModel>,
     output: &mut impl Write,
 ) -> Result<()> {
-    let hits = index.search(
+    let hits = index.search_with_model(
         search.query.as_deref().unwrap_or_default(),
         &SearchOptions {
             path: search.path,
@@ -228,7 +228,7 @@ fn run_search(
             category: search.category.map(Into::into),
             limit: search.limit as usize,
         },
-        &mut start_model()?,
+        start_model,
     )?;
     if search.json {
         return print_json(output, &hits);

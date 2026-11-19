@@ -47,7 +47,7 @@ semfind --kind video --path "$HOME/Videos"
 semfind "Datenschutz" --kind text --type pdf
 ```
 
-`--kind` groups file extensions and can list indexed files without a query. Images and videos are searchable by filename and path. Their visual and audio contents are outside the current index. Rescan your indexed folders to include images and videos.
+`--kind` groups file extensions and can list indexed files without a query. Image and video searches use filenames and paths. Listing indexed files or filtering a search to image and video formats works without loading the model. Rescan your indexed folders to include images and videos.
 
 ```bash
 semfind index "$HOME/Documents" --exclude Private --exclude Archive/taxes
@@ -64,7 +64,7 @@ Local data defaults to `${XDG_DATA_HOME:-$HOME/.local/share}/semfind`. Set `SEMF
 
 The Rust CLI calls the same library that future clients will use. The core stages reads, extracts text, and stores passages and vectors in a single SQLite transaction. A local CPU worker runs the E5 model through ONNX Runtime. Query-time cosine similarity and FTS5's BM25 rankings are fused with Reciprocal Rank Fusion. See [architecture](docs/architecture.md) and [privacy](docs/privacy.md).
 
-The MVP is intended for small collections. Exact cosine search scales linearly with the number of passages. Scanned PDFs require a text layer. Settings results carry catalog metadata. A desktop UI, installed application discovery, activation, a background service, and file history are roadmap items. See [roadmap](docs/roadmap.md) and [COSMIC research](integrations/cosmic/README.md).
+The MVP is intended for small collections. Exact cosine search scales linearly with the number of passages. The local E5 model uses a minimum cosine similarity for semantic hits. Literal and full-text matching still apply at any similarity. Scanned PDFs require a text layer. Settings results carry catalog metadata. A desktop UI, installed application discovery, activation, a background service, and file history are roadmap items. See [roadmap](docs/roadmap.md) and [COSMIC research](integrations/cosmic/README.md).
 
 ## Contribute
 

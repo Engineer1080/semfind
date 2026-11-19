@@ -1,4 +1,5 @@
 use anyhow::{Result, bail};
+use rusqlite::{Connection, TransactionBehavior};
 use semfind_core::{Category, Embedder, FileKind, Index, IndexOptions, InputKind, SearchOptions};
 use std::{
     fs,
@@ -14,6 +15,10 @@ struct FixtureModel {
 impl Embedder for FixtureModel {
     fn identity(&self) -> &str {
         self.identity
+    }
+
+    fn minimum_similarity(&self) -> Option<f32> {
+        Some(0.78)
     }
 
     fn encode(&mut self, kind: InputKind, texts: &[String]) -> Result<Vec<Vec<f32>>> {
@@ -150,6 +155,46 @@ fn rescans_skip_unchanged_passages_and_roll_back_failed_changes() -> Result<()> 
     assert!(index.remove_root(&root)?);
     let status = index.status()?;
     assert_eq!((status.files, status.settings, status.chunks), (0, 5, 5));
+    Ok(())
+}
+
+#[test]
+fn weak_semantic_similarity_does_not_remove_lexical_matches() -> Result<()> {
+    let (_temp, mut index, root, mut model) = new_fixture()?;
+    fixture(&root, "notes.txt", "Store the supplies in a refrigerator.")?;
+    index.synchronize(Some(&root), &Default::default(), &mut model)?;
+    let options = SearchOptions {
+        path: Some(root),
+        ..Default::default()
+    };
+    assert!(index.search("watering", &options, &mut model)?.is_empty());
+    assert_eq!(index.search("supplies", &options, &mut model)?.len(), 1);
+    assert_eq!(index.search("cold storage", &options, &mut model)?.len(), 1);
+    assert!(index.search("notes.txt", &options, &mut model)?[0].exact);
+    Ok(())
+}
+
+#[test]
+fn existing_index_can_be_read_during_a_write_transaction() -> Result<()> {
+    let (temp, mut index, root, mut model) = new_fixture()?;
+    fixture(&root, "workshop.jpg", "")?;
+    index.synchronize(Some(&root), &Default::default(), &mut model)?;
+    let directory = temp.path().join("index");
+    let mut writer = Connection::open(directory.join("index.sqlite3"))?;
+    let pending = writer.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    pending.execute("DELETE FROM sources WHERE category = 'file'", [])?;
+
+    let reader = Index::open(&directory)?;
+    assert_eq!(reader.status()?.files, 1);
+    let options = SearchOptions {
+        file_kind: Some(FileKind::Image),
+        ..Default::default()
+    };
+    let hits = reader.search_with_model::<FixtureModel>("workshop", &options, || {
+        bail!("a filename search should not start the model")
+    })?;
+    assert_eq!(hits[0].title, "workshop.jpg");
+    pending.rollback()?;
     Ok(())
 }
 

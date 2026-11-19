@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2
+
+- File listings and searches filtered to images or videos run without starting Python or loading the embedding model.
+- E5 semantic matches require a cosine similarity of at least 0.78. Full-text and exact matches remain eligible regardless of similarity.
+- Searches and status checks can read an existing index during a rescan's SQLite write reservation. Opening an index takes a write reservation only for schema creation or migration.
+- In a local Pop!_OS benchmark with 203 synthetic files, image listing and video filename search fell from about 1.77 s to about 2 ms. Under a controlled SQLite write reservation, median status latency fell from 831 ms to 1.72 ms. Semantic search and rescan times were comparable.
+
 ## 0.1.1
 
 - Added grouped filters for text, images, and videos. Run `semfind --kind image` to list images or supply a query to search image filenames and paths.

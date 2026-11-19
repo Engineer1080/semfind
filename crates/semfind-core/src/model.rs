@@ -17,6 +17,11 @@ pub trait Embedder {
     /// Stable identity including weights, tokenizer and encoding recipe.
     fn identity(&self) -> &str;
 
+    /// Minimum cosine similarity for semantic matches, when calibrated for this encoder.
+    fn minimum_similarity(&self) -> Option<f32> {
+        None
+    }
+
     /// Encode a batch in a shared vector space.
     fn encode(&mut self, kind: InputKind, texts: &[String]) -> Result<Vec<Vec<f32>>>;
 }
@@ -71,6 +76,10 @@ impl LocalModel {
 impl Embedder for LocalModel {
     fn identity(&self) -> &str {
         &self.identity
+    }
+
+    fn minimum_similarity(&self) -> Option<f32> {
+        Some(0.78)
     }
 
     fn encode(&mut self, kind: InputKind, texts: &[String]) -> Result<Vec<Vec<f32>>> {

@@ -87,16 +87,23 @@ impl Index {
         conn.execute_batch(
             "PRAGMA foreign_keys = ON; PRAGMA secure_delete = ON; PRAGMA temp_store = MEMORY;",
         )?;
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let version: i64 = tx.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        let version = schema_version(&conn)?;
         match version {
-            0 => tx.execute_batch(SCHEMA)?,
-            // Version 2 also permits lexical-only chunks with an empty embedding.
-            1 => tx.pragma_update(None, "user_version", 2)?,
+            0 | 1 => {
+                let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                // Another process may have migrated the index while we waited for the lock.
+                match schema_version(&tx)? {
+                    0 => tx.execute_batch(SCHEMA)?,
+                    // Version 2 also permits lexical-only chunks with an empty embedding.
+                    1 => tx.pragma_update(None, "user_version", 2)?,
+                    2 => (),
+                    version => anyhow::bail!("unsupported database schema version {version}"),
+                }
+                tx.commit()?;
+            }
             2 => (),
             _ => anyhow::bail!("unsupported database schema version {version}"),
         }
-        tx.commit()?;
         Ok(Self { conn })
     }
 
@@ -199,6 +206,10 @@ impl Index {
             .execute("DELETE FROM roots WHERE path = ?1", [path])?
             > 0)
     }
+}
+
+fn schema_version(conn: &Connection) -> rusqlite::Result<i64> {
+    conn.query_row("PRAGMA user_version", [], |row| row.get(0))
 }
 
 pub(crate) fn check_model(conn: &Connection, model: &impl Embedder) -> Result<()> {
