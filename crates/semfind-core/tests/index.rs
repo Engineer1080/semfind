@@ -86,9 +86,10 @@ fn persistent_hybrid_search_filters_and_prioritizes_exact_literals() -> Result<(
         exclude: Some(vec!["secrets".into()]),
     };
     let first = index.synchronize(Some(&root), &options, &mut model)?;
-    assert_eq!(first.written, 9);
+    let commands = usize::try_from(index.status()?.commands)?;
+    assert_eq!(first.written, 9 + commands);
     let rescan = index.synchronize(Some(&root), &IndexOptions::default(), &mut model)?;
-    assert_eq!((rescan.written, rescan.unchanged), (0, 9));
+    assert_eq!((rescan.written, rescan.unchanged), (0, 9 + commands));
     drop(index);
 
     let index = Index::open(&temp.path().join("index"))?;
@@ -134,7 +135,10 @@ fn rescans_skip_unchanged_passages_and_roll_back_failed_changes() -> Result<()> 
     let count = model.passages;
     let report = index.synchronize(Some(&root), &Default::default(), &mut model)?;
     assert_eq!(count, model.passages);
-    assert_eq!(report.unchanged, 7);
+    assert_eq!(
+        report.unchanged,
+        7 + usize::try_from(index.status()?.commands)?
+    );
 
     fs::remove_file(disappearing)?;
     fixture(&root, "z.txt", "watering")?;
@@ -154,7 +158,8 @@ fn rescans_skip_unchanged_passages_and_roll_back_failed_changes() -> Result<()> 
     assert_eq!((report.written, report.removed), (1, 1));
     assert!(index.remove_root(&root)?);
     let status = index.status()?;
-    assert_eq!((status.files, status.settings, status.chunks), (0, 5, 5));
+    assert_eq!((status.files, status.settings), (0, 5));
+    assert_eq!(status.chunks, status.settings + status.commands);
     Ok(())
 }
 
@@ -205,12 +210,19 @@ fn file_kind_filters_list_multiple_formats_and_search_media_names() -> Result<()
     index.synchronize(Some(&root), &IndexOptions::default(), &mut model)?;
     drop(index);
     let index_dir = temp.path().join("index");
-    // Emulate a v1 database containing text and catalog entries.
+    // Emulate a pre-command database containing text and settings.
     let db = rusqlite::Connection::open(index_dir.join("index.sqlite3"))?;
-    db.pragma_update(None, "user_version", 1)?;
+    db.execute_batch(
+        "PRAGMA foreign_keys = ON;
+         DELETE FROM sources WHERE category = 'command';
+         ALTER TABLE sources DROP COLUMN command_distro;
+         ALTER TABLE sources DROP COLUMN command_example;
+         PRAGMA user_version = 1;",
+    )?;
     drop(db);
     let mut index = Index::open(&index_dir)?;
     assert_eq!(index.status()?.files, 1);
+    assert_eq!(index.status()?.commands, 0);
     fixture(&root, "garden.JPG", "hiddenmarker")?;
     fixture(&root, "garden.PNG", "other image bytes")?;
     fixture(&root, "clips/garden.webm", "video bytes")?;
@@ -219,9 +231,13 @@ fn file_kind_filters_list_multiple_formats_and_search_media_names() -> Result<()
     drop(large_video);
     fixture(&root, "garden.zip", "unsupported")?;
     fixture(&root, ".private/garden.png", "excluded")?;
+    let previously_encoded = model.passages;
     index.synchronize(Some(&root), &IndexOptions::default(), &mut model)?;
     let status = index.status()?;
-    assert_eq!((status.files, status.chunks, model.passages), (5, 6, 6));
+    assert_eq!(status.files, 5);
+    assert_eq!(status.chunks, 6 + status.commands);
+    let encoded = previously_encoded + usize::try_from(status.commands)?;
+    assert_eq!(model.passages, encoded);
     drop(index);
     let mut index = Index::open(&temp.path().join("index"))?;
     for (kind, expected) in [
@@ -257,7 +273,7 @@ fn file_kind_filters_list_multiple_formats_and_search_media_names() -> Result<()
     assert!(index.search("garden.JPG", &jpg, &mut model)?.is_empty());
     index.synchronize(Some(&root), &IndexOptions::default(), &mut model)?;
     assert_eq!(index.status()?.files, 4);
-    assert_eq!(model.passages, 6);
+    assert_eq!(model.passages, encoded);
     jpg.file_kind = Some(FileKind::Video);
     assert!(index.search("", &jpg, &mut model)?.is_empty());
     Ok(())

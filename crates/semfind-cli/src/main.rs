@@ -1,8 +1,10 @@
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand, ValueEnum};
 use semfind_core::{
-    Category, FileKind, Index, IndexOptions, IndexReport, LocalModel, SearchOptions,
+    Category, Distro, FileKind, Index, IndexOptions, IndexReport, LocalModel, SearchOptions,
 };
+mod distro;
+use distro::DistroFilter;
 use std::{
     env,
     io::{self, Write},
@@ -31,7 +33,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Index the home directory, installed desktop applications and COSMIC settings.
+    /// Index the home directory, desktop applications, local commands and built-in catalogs.
     Init {
         /// Exclude a directory or file by name or by a path relative to HOME.
         #[arg(long)]
@@ -40,9 +42,12 @@ enum Command {
         #[arg(long, conflicts_with = "exclude")]
         clear_excludes: bool,
     },
-    /// Synchronize one directory and the settings catalog. Omit the root for settings only.
+    /// Synchronize a directory and the built-in catalogs. Omit the root for catalogs only.
     Index {
         root: Option<PathBuf>,
+        /// Include local manual pages and executable names from PATH.
+        #[arg(long)]
+        manpages: bool,
         /// Exclude a directory or file by name or by a path relative to the root.
         #[arg(long, requires = "root")]
         exclude: Vec<PathBuf>,
@@ -74,6 +79,9 @@ struct Search {
     path: Option<PathBuf>,
     #[arg(long, value_enum)]
     category: Option<Filter>,
+    /// Distribution for command examples. Defaults to the detected family.
+    #[arg(long, value_enum)]
+    distro: Option<DistroFilter>,
     #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(u32).range(1..=100))]
     limit: u32,
     #[arg(long)]
@@ -107,6 +115,8 @@ enum Filter {
     Application,
     #[value(alias = "settings")]
     Setting,
+    #[value(alias = "commands")]
+    Command,
     #[value(alias = "actions")]
     Action,
 }
@@ -117,6 +127,7 @@ impl From<Filter> for Category {
             Filter::File => Self::File,
             Filter::Application => Self::Application,
             Filter::Setting => Self::Setting,
+            Filter::Command => Self::Command,
             Filter::Action => Self::Action,
         }
     }
@@ -167,6 +178,15 @@ fn run(cli: Cli, output: &mut impl Write) -> Result<()> {
         None => data_dir()?.join("index"),
     };
     let mut index = Index::open(&dir).with_context(|| format!("open index {}", dir.display()))?;
+    if cfg!(target_os = "linux")
+        && !matches!(cli.command, Some(Command::Init { .. }))
+        && !index.is_initialized()?
+    {
+        eprintln!(
+            "semfind: Find documents by what you remember, apps by what they do, and Linux commands by describing the task.\n\
+             semfind: Run `semfind init` once to set up local search."
+        );
+    }
     let start_model = || {
         let directory = match &cli.model_dir {
             Some(path) => path.clone(),
@@ -182,8 +202,8 @@ fn run(cli: Cli, output: &mut impl Write) -> Result<()> {
             }
             writeln!(
                 output,
-                "Files: {} | Settings: {} | Applications: {} | Passages: {}",
-                status.files, status.settings, status.applications, status.chunks
+                "Files: {} | Settings: {} | Applications: {} | Commands: {} | Passages: {}",
+                status.files, status.settings, status.applications, status.commands, status.chunks
             )?;
             for root in status.roots {
                 writeln!(output, "Root: {}", root.display())?;
@@ -213,16 +233,24 @@ fn run(cli: Cli, output: &mut impl Write) -> Result<()> {
         }
         Some(Command::Index {
             root,
+            manpages,
             exclude,
             clear_excludes,
         }) => {
-            let report = index.synchronize(
-                root.as_deref(),
-                &IndexOptions {
-                    exclude: (clear_excludes || !exclude.is_empty()).then_some(exclude),
-                },
-                &mut start_model()?,
-            )?;
+            let options = IndexOptions {
+                exclude: (clear_excludes || !exclude.is_empty()).then_some(exclude),
+            };
+            let mut model = start_model()?;
+            let report = if manpages {
+                index.synchronize_with_manpages(
+                    root.as_deref(),
+                    &options,
+                    Distro::current(),
+                    &mut model,
+                )?
+            } else {
+                index.synchronize(root.as_deref(), &options, &mut model)?
+            };
             print_index_report(output, &report)?;
         }
         Some(Command::Search(search)) => run_search(&index, search, start_model, output)?,
@@ -249,6 +277,8 @@ fn run_search(
     start_model: impl FnOnce() -> Result<LocalModel>,
     output: &mut impl Write,
 ) -> Result<()> {
+    let local_distro = Distro::current();
+    let selected_distro = search.distro.map(Into::into).unwrap_or(local_distro);
     let hits = index.search_with_model(
         search.query.as_deref().unwrap_or_default(),
         &SearchOptions {
@@ -256,6 +286,8 @@ fn run_search(
             extension: search.extension,
             file_kind: search.file_kind.map(Into::into),
             category: search.category.map(Into::into),
+            distro: Some(selected_distro),
+            include_local_commands: selected_distro == local_distro,
             limit: search.limit as usize,
         },
         start_model,
@@ -264,16 +296,23 @@ fn run_search(
         return print_json(output, &hits);
     }
     for hit in hits {
+        let label = hit.distro.map_or_else(
+            || hit.category.as_str().to_owned(),
+            |family| format!("{}/{}", hit.category.as_str(), family.as_str()),
+        );
         writeln!(
             output,
             "[{}] {}  ({:.4})",
-            hit.category.as_str(),
+            label,
             visible(&hit.title),
             hit.score
         )?;
         writeln!(output, "  {}", visible(&hit.id))?;
         if !hit.snippet.is_empty() {
             writeln!(output, "  {}", visible(&hit.snippet))?;
+        }
+        if let Some(example) = &hit.example {
+            writeln!(output, "  $ {}", visible(example))?;
         }
     }
     Ok(())

@@ -1,7 +1,9 @@
 use crate::{
     applications::{self, Application},
     catalog::SETTINGS,
+    commands::{COMMANDS, Distro},
     files::{self, FileKind},
+    manuals,
     model::{Embedder, InputKind, normalized},
 };
 use anyhow::{Context, Result, ensure};
@@ -17,13 +19,15 @@ use walkdir::WalkDir;
 const SOURCE_COLUMNS: &str = "(
     id INTEGER PRIMARY KEY,
     key TEXT UNIQUE NOT NULL,
-    category TEXT NOT NULL CHECK (category IN ('file', 'setting', 'application')),
+    category TEXT NOT NULL CHECK (category IN ('file', 'setting', 'application', 'command')),
     title TEXT NOT NULL,
     root TEXT REFERENCES roots(path) ON DELETE CASCADE,
     extension TEXT,
     desktop TEXT,
     setting_group TEXT,
-    digest BLOB NOT NULL
+    digest BLOB NOT NULL,
+    command_distro TEXT CHECK (command_distro IN ('generic', 'debian', 'arch')),
+    command_example TEXT
 )";
 
 const SCHEMA: &str = "
@@ -41,8 +45,9 @@ INSERT INTO fulltext(fulltext, rank) VALUES('secure-delete', 1);
 CREATE TRIGGER IF NOT EXISTS delete_chunk AFTER DELETE ON chunks BEGIN
     DELETE FROM fulltext WHERE rowid = old.id;
 END;
-PRAGMA user_version = 3;
+PRAGMA user_version = 4;
 ";
+const INIT_COMPLETED_KEY: &str = "init_complete";
 
 /// A persistent search index. Use one connection per client or worker.
 pub struct Index {
@@ -74,6 +79,7 @@ pub struct Status {
     pub files: i64,
     pub settings: i64,
     pub applications: i64,
+    pub commands: i64,
     pub chunks: i64,
     pub model: Option<String>,
 }
@@ -90,11 +96,20 @@ impl Index {
         )?;
         let version = schema_version(&conn)?;
         match version {
-            0..=2 => migrate(&mut conn)?,
-            3 => (),
+            0..=3 => migrate(&mut conn)?,
+            4 => (),
             _ => anyhow::bail!("unsupported database schema version {version}"),
         }
         Ok(Self { conn })
+    }
+
+    /// Whether `init` has successfully completed for this index.
+    pub fn is_initialized(&self) -> Result<bool> {
+        Ok(self.conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM metadata WHERE key = ?1)",
+            [INIT_COMPLETED_KEY],
+            |row| row.get(0),
+        )?)
     }
 
     /// Inspect the index without loading a model.
@@ -104,13 +119,22 @@ impl Index {
             .prepare("SELECT path FROM roots ORDER BY path")?
             .query_map([], |row| Ok(PathBuf::from(row.get::<_, String>(0)?)))?
             .collect::<rusqlite::Result<_>>()?;
-        let (files, settings, applications, chunks) = tx.query_row(
+        let (files, settings, applications, commands, chunks) = tx.query_row(
             "SELECT (SELECT count(*) FROM sources WHERE category='file'),
                     (SELECT count(*) FROM sources WHERE category='setting'),
                     (SELECT count(*) FROM sources WHERE category='application'),
+                    (SELECT count(*) FROM sources WHERE category='command'),
                     (SELECT count(*) FROM chunks WHERE length(embedding) > 0)",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
         )?;
         let model = model_identity(&tx)?;
         tx.commit()?;
@@ -119,12 +143,13 @@ impl Index {
             files,
             settings,
             applications,
+            commands,
             chunks,
             model,
         })
     }
 
-    /// Synchronize the built-in settings catalog and optionally a selected directory.
+    /// Synchronize the built-in catalogs and optionally a selected directory.
     /// Successful runs commit both text and vectors atomically.
     pub fn synchronize(
         &mut self,
@@ -132,10 +157,25 @@ impl Index {
         options: &IndexOptions,
         model: &mut impl Embedder,
     ) -> Result<IndexReport> {
-        self.synchronize_sources(root, options, false, model)
+        self.synchronize_sources(root, options, false, None, model)
     }
 
-    /// Synchronize the home directory, installed desktop applications and the settings catalog.
+    /// Refresh the installed command catalog alongside the ordinary index sources.
+    pub fn synchronize_with_manpages(
+        &mut self,
+        root: Option<&Path>,
+        options: &IndexOptions,
+        distro: Distro,
+        model: &mut impl Embedder,
+    ) -> Result<IndexReport> {
+        ensure!(
+            cfg!(target_os = "linux"),
+            "index --manpages is supported on Linux"
+        );
+        self.synchronize_sources(root, options, false, Some(distro), model)
+    }
+
+    /// Synchronize the home directory, installed desktop applications, local commands and catalogs.
     pub fn initialize_home(
         &mut self,
         home: &Path,
@@ -144,14 +184,15 @@ impl Index {
     ) -> Result<IndexReport> {
         ensure!(cfg!(target_os = "linux"), "init is supported on Linux");
         ensure!(home.is_absolute(), "HOME must be an absolute path");
-        self.synchronize_sources(Some(home), options, true, model)
+        self.synchronize_sources(Some(home), options, true, Some(Distro::current()), model)
     }
 
     fn synchronize_sources(
         &mut self,
         root: Option<&Path>,
         options: &IndexOptions,
-        include_applications: bool,
+        initializing: bool,
+        local_command_distro: Option<Distro>,
         model: &mut impl Embedder,
     ) -> Result<IndexReport> {
         ensure!(
@@ -178,6 +219,7 @@ impl Index {
         )?;
         let mut report = IndexReport::default();
         synchronize_catalog(&tx, model, &mut report)?;
+        synchronize_commands(&tx, model, &mut report)?;
         if let Some(root) = root {
             let name = root.to_str().context("index roots must be valid UTF-8")?;
             let existing = tx
@@ -210,10 +252,19 @@ impl Index {
                 serde_json::from_str(&encoded)?
             };
             synchronize_files(&tx, &root, name, &exclusions, model, &mut report)?;
-            if include_applications {
+            if initializing {
                 let applications = applications::discover(&root)?;
                 synchronize_applications(&tx, &applications, model, &mut report)?;
             }
+        }
+        if let Some(distro) = local_command_distro {
+            synchronize_local_commands(&tx, distro, model, &mut report)?;
+        }
+        if initializing {
+            tx.execute(
+                "INSERT OR IGNORE INTO metadata (key, value) VALUES (?1, '1')",
+                [INIT_COMPLETED_KEY],
+            )?;
         }
         tx.commit()?;
         Ok(report)
@@ -246,14 +297,15 @@ fn migrate(conn: &mut Connection) -> Result<()> {
              CREATE TABLE IF NOT EXISTS sources {SOURCE_COLUMNS};
              {SCHEMA}"
         ))?,
-        1 | 2 => {
+        1..=3 => {
             tx.execute_batch(&format!(
                 "CREATE TABLE sources_new {SOURCE_COLUMNS};
-                 INSERT INTO sources_new SELECT * FROM sources;
+                 INSERT INTO sources_new (id, key, category, title, root, extension, desktop, setting_group, digest)
+                 SELECT id, key, category, title, root, extension, desktop, setting_group, digest FROM sources;
                  DROP TABLE sources;
                  ALTER TABLE sources_new RENAME TO sources;
                  CREATE INDEX sources_root ON sources(root);
-                 PRAGMA user_version = 3;"
+                 PRAGMA user_version = 4;"
             ))?;
             let invalid: bool = tx.query_row(
                 "SELECT EXISTS (SELECT 1 FROM pragma_foreign_key_check)",
@@ -262,7 +314,7 @@ fn migrate(conn: &mut Connection) -> Result<()> {
             )?;
             ensure!(!invalid, "index contains invalid foreign keys");
         }
-        3 => (),
+        4 => (),
         version => anyhow::bail!("unsupported database schema version {version}"),
     }
     tx.commit()?;
@@ -299,6 +351,8 @@ struct Source<'a> {
     extension: Option<&'a str>,
     desktop: Option<&'static str>,
     setting_group: Option<&'static str>,
+    distro: Option<Distro>,
+    example: Option<&'a str>,
 }
 
 fn source_state(conn: &Connection, key: &str) -> Result<Option<(i64, Vec<u8>)>> {
@@ -319,10 +373,11 @@ fn write_source(
     model: &mut impl Embedder,
 ) -> Result<i64> {
     let id: i64 = tx.query_row(
-        "INSERT INTO sources(key,category,title,root,extension,desktop,setting_group,digest)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
+        "INSERT INTO sources(key,category,title,root,extension,desktop,setting_group,digest,command_distro,command_example)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
          ON CONFLICT(key) DO UPDATE SET title=excluded.title, extension=excluded.extension,
-           setting_group=excluded.setting_group, digest=excluded.digest RETURNING id",
+           setting_group=excluded.setting_group, digest=excluded.digest,
+           command_distro=excluded.command_distro, command_example=excluded.command_example RETURNING id",
         params![
             source.key,
             source.category,
@@ -331,7 +386,9 @@ fn write_source(
             source.extension,
             source.desktop,
             source.setting_group,
-            digest
+            digest,
+            source.distro.map(Distro::as_str),
+            source.example
         ],
         |row| row.get(0),
     )?;
@@ -402,17 +459,18 @@ fn store_chunk(
     text: &str,
     embedding: &[u8],
 ) -> Result<()> {
+    let searchable_title = if source.key.starts_with(manuals::KEY_PREFIX) {
+        source.title.to_owned()
+    } else {
+        format!("{} {}", source.title, source.key)
+    };
     tx.execute(
         "INSERT INTO chunks(source, embedding) VALUES (?1, ?2)",
         params![id, embedding],
     )?;
     tx.execute(
         "INSERT INTO fulltext(rowid, title, body) VALUES (?1, ?2, ?3)",
-        params![
-            tx.last_insert_rowid(),
-            format!("{} {}", source.title, source.key),
-            text
-        ],
+        params![tx.last_insert_rowid(), searchable_title, text],
     )?;
     Ok(())
 }
@@ -426,13 +484,7 @@ fn synchronize_catalog(
     for setting in SETTINGS {
         let text = format!("{} {}", setting.description, setting.synonyms);
         let digest = Sha256::digest(format!("v1\n{}\n{}\n{text}", setting.title, setting.group));
-        let stored = source_state(tx, setting.id)?;
-        if let Some((id, _)) = stored.filter(|(_, saved)| saved == digest.as_slice()) {
-            keep.push(id);
-            report.unchanged += 1;
-            continue;
-        }
-        keep.push(write_source(
+        keep.push(sync_catalog_entry(
             tx,
             Source {
                 key: setting.id,
@@ -442,14 +494,16 @@ fn synchronize_catalog(
                 extension: None,
                 desktop: Some("cosmic"),
                 setting_group: Some(setting.group),
+                distro: None,
+                example: None,
             },
             Some(&text),
             &digest,
             model,
+            report,
         )?);
-        report.written += 1;
     }
-    remove_missing_sources(tx, "setting", &keep, report)
+    remove_missing_sources(tx, "setting", false, &keep, report)
 }
 
 fn synchronize_applications(
@@ -461,13 +515,7 @@ fn synchronize_applications(
     let mut keep = Vec::new();
     for app in applications {
         let digest = Sha256::digest(format!("application-v1\n{}\n{}", app.name, app.text));
-        let stored = source_state(tx, &app.id)?;
-        if let Some((id, _)) = stored.filter(|(_, saved)| saved == digest.as_slice()) {
-            keep.push(id);
-            report.unchanged += 1;
-            continue;
-        }
-        keep.push(write_source(
+        keep.push(sync_catalog_entry(
             tx,
             Source {
                 key: &app.id,
@@ -477,26 +525,127 @@ fn synchronize_applications(
                 extension: None,
                 desktop: None,
                 setting_group: None,
+                distro: None,
+                example: None,
             },
             Some(&app.text),
             &digest,
             model,
+            report,
         )?);
-        report.written += 1;
     }
-    remove_missing_sources(tx, "application", &keep, report)
+    remove_missing_sources(tx, "application", false, &keep, report)
+}
+
+fn synchronize_commands(
+    tx: &Transaction<'_>,
+    model: &mut impl Embedder,
+    report: &mut IndexReport,
+) -> Result<()> {
+    let mut keep = Vec::new();
+    for command in COMMANDS {
+        let digest = Sha256::digest(format!(
+            "command-v1\n{}\n{}\n{}\n{}",
+            command.title,
+            command.distro.as_str(),
+            command.description,
+            command.example
+        ));
+        keep.push(sync_catalog_entry(
+            tx,
+            Source {
+                key: command.id,
+                category: "command",
+                title: command.title,
+                root: None,
+                extension: None,
+                desktop: None,
+                setting_group: None,
+                distro: Some(command.distro),
+                example: Some(command.example),
+            },
+            Some(command.description),
+            &digest,
+            model,
+            report,
+        )?);
+    }
+    remove_missing_sources(tx, "command", false, &keep, report)
+}
+
+fn synchronize_local_commands(
+    tx: &Transaction<'_>,
+    distro: Distro,
+    model: &mut impl Embedder,
+    report: &mut IndexReport,
+) -> Result<()> {
+    let mut keep = Vec::new();
+    for command in manuals::discover()? {
+        let digest = Sha256::digest(format!(
+            "local-command-v1\n{}\n{}\n{}\n{}",
+            distro.as_str(),
+            command.name,
+            command.text.as_deref().unwrap_or_default(),
+            command.example.as_deref().unwrap_or_default()
+        ));
+        keep.push(sync_catalog_entry(
+            tx,
+            Source {
+                key: &command.key,
+                category: "command",
+                title: &command.name,
+                root: None,
+                extension: None,
+                desktop: None,
+                setting_group: None,
+                distro: Some(distro),
+                example: command.example.as_deref(),
+            },
+            command.text.as_deref(),
+            &digest,
+            model,
+            report,
+        )?);
+    }
+    remove_missing_sources(tx, "command", true, &keep, report)
+}
+
+fn sync_catalog_entry(
+    tx: &Transaction<'_>,
+    source: Source<'_>,
+    text: Option<&str>,
+    digest: &[u8],
+    model: &mut impl Embedder,
+    report: &mut IndexReport,
+) -> Result<i64> {
+    if let Some((id, _)) = source_state(tx, source.key)?.filter(|(_, saved)| saved == digest) {
+        report.unchanged += 1;
+        return Ok(id);
+    }
+    let id = write_source(tx, source, text, digest, model)?;
+    report.written += 1;
+    Ok(id)
 }
 
 fn remove_missing_sources(
     tx: &Transaction<'_>,
     category: &str,
+    local_commands: bool,
     keep: &[i64],
     report: &mut IndexReport,
 ) -> Result<()> {
     let ids = tx
-        .prepare("SELECT id FROM sources WHERE category = ?1")?
-        .query_map([category], |row| row.get::<_, i64>(0))?
+        .prepare("SELECT id FROM sources WHERE category = ?1 AND (key GLOB ?2) = ?3")?
+        .query_map(
+            params![
+                category,
+                format!("{}*", manuals::KEY_PREFIX),
+                local_commands
+            ],
+            |row| row.get::<_, i64>(0),
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    let keep: std::collections::HashSet<_> = keep.iter().copied().collect();
     for id in ids.into_iter().filter(|id| !keep.contains(id)) {
         report.removed += tx.execute("DELETE FROM sources WHERE id = ?1", [id])?;
     }
@@ -600,6 +749,8 @@ fn synchronize_files(
                     extension: Some(&extension),
                     desktop: None,
                     setting_group: None,
+                    distro: None,
+                    example: None,
                 },
                 text.as_deref(),
                 &digest,

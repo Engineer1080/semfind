@@ -1,6 +1,8 @@
 use crate::{
+    commands::Distro,
     files::{self, FileKind},
     index::{Index, check_model},
+    manuals,
     model::{Embedder, InputKind, normalized},
 };
 use anyhow::{Context, Result, ensure};
@@ -18,6 +20,7 @@ pub enum Category {
     File,
     Application,
     Setting,
+    Command,
     Action,
 }
 
@@ -28,6 +31,7 @@ impl Category {
             Self::File => "file",
             Self::Application => "application",
             Self::Setting => "setting",
+            Self::Command => "command",
             Self::Action => "action",
         }
     }
@@ -40,6 +44,10 @@ pub struct SearchOptions {
     pub extension: Option<String>,
     pub file_kind: Option<FileKind>,
     pub category: Option<Category>,
+    /// Restrict distribution-specific command hits to the selected family.
+    pub distro: Option<Distro>,
+    /// Include locally installed manual pages and executable names.
+    pub include_local_commands: bool,
     pub limit: usize,
 }
 
@@ -50,6 +58,8 @@ impl Default for SearchOptions {
             extension: None,
             file_kind: None,
             category: None,
+            distro: None,
+            include_local_commands: true,
             limit: 10,
         }
     }
@@ -66,6 +76,10 @@ pub struct Hit {
     pub extension: Option<String>,
     pub desktop: Option<String>,
     pub setting_group: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub distro: Option<Distro>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub example: Option<String>,
     pub score: f64,
     pub exact: bool,
     pub snippet: String,
@@ -74,6 +88,7 @@ pub struct Hit {
 struct Candidate {
     hit: Hit,
     literal_name: bool,
+    explicit_command: bool,
     lexical_chunk: Option<i64>,
     vector_chunk: Option<(i64, f32)>,
     exact_chunk: Option<i64>,
@@ -143,11 +158,20 @@ impl Index {
         let needle = query.to_lowercase();
         {
             let mut statement = tx.prepare(
-                "SELECT id,key,category,title,root,extension,desktop,setting_group FROM sources
-                 WHERE (?1 IS NULL OR category=?1) AND (?2 IS NULL OR extension=?2)",
+                "SELECT id,key,category,title,root,extension,desktop,setting_group,
+                        command_distro,command_example FROM sources
+                 WHERE (?1 IS NULL OR category=?1) AND (?2 IS NULL OR extension=?2)
+                   AND (?3 IS NULL OR command_distro IS NULL
+                        OR command_distro = 'generic' OR command_distro = ?3)
+                   AND (?4 OR key NOT GLOB ?5)",
             )?;
-            let mut rows =
-                statement.query(params![options.category.map(Category::as_str), extension])?;
+            let mut rows = statement.query(params![
+                options.category.map(Category::as_str),
+                extension,
+                options.distro.map(Distro::as_str),
+                options.include_local_commands,
+                format!("{}*", manuals::KEY_PREFIX)
+            ])?;
             while let Some(row) = rows.next()? {
                 let id: i64 = row.get(0)?;
                 let key: String = row.get(1)?;
@@ -177,6 +201,8 @@ impl Index {
                     None
                 };
                 let literal_name = key == query || title == query;
+                let explicit_command = options.category == Some(Category::Command)
+                    && command_mentioned(&needle, &title.to_lowercase());
                 let hit = Hit {
                     exact: literal_name
                         || key.to_lowercase() == needle
@@ -187,10 +213,16 @@ impl Index {
                     extension,
                     desktop: row.get(6)?,
                     setting_group: row.get(7)?,
+                    distro: row
+                        .get::<_, Option<String>>(8)?
+                        .map(|value| Distro::from_str(&value).context("invalid command distro"))
+                        .transpose()?,
+                    example: row.get(9)?,
                     category: match category.as_str() {
                         "file" => Category::File,
                         "setting" => Category::Setting,
                         "application" => Category::Application,
+                        "command" => Category::Command,
                         _ => anyhow::bail!("unsupported source category {category}"),
                     },
                     score: 0.0,
@@ -201,6 +233,7 @@ impl Index {
                     Candidate {
                         hit,
                         literal_name,
+                        explicit_command,
                         lexical_chunk: None,
                         vector_chunk: None,
                         exact_chunk: None,
@@ -306,7 +339,7 @@ impl Index {
         }
         let mut ranked: Vec<_> = candidates
             .into_values()
-            .filter(|item| item.hit.exact || item.hit.score > 0.0)
+            .filter(|item| item.hit.exact || item.explicit_command || item.hit.score > 0.0)
             .collect();
         ranked.sort_unstable_by(|a, b| {
             b.hit
@@ -314,6 +347,7 @@ impl Index {
                 .cmp(&a.hit.exact)
                 .then_with(|| b.literal_name.cmp(&a.literal_name))
                 .then_with(|| a.exact_chunk.is_some().cmp(&b.exact_chunk.is_some()))
+                .then_with(|| b.explicit_command.cmp(&a.explicit_command))
                 .then_with(|| b.hit.score.total_cmp(&a.hit.score))
                 .then_with(|| a.hit.id.cmp(&b.hit.id))
         });
@@ -321,11 +355,22 @@ impl Index {
         {
             let mut body = tx.prepare("SELECT body FROM fulltext WHERE rowid=?1")?;
             for mut item in ranked.into_iter().take(options.limit) {
-                if let Some(chunk) = item
+                let chunk = item
                     .exact_chunk
                     .or(item.lexical_chunk)
-                    .or(item.vector_chunk.map(|(id, _)| id))
-                {
+                    .or(item.vector_chunk.map(|(id, _)| id));
+                let chunk = if item.explicit_command && chunk.is_none() {
+                    tx.query_row(
+                        "SELECT id FROM chunks WHERE source=(SELECT id FROM sources WHERE key=?1)
+                         ORDER BY id LIMIT 1",
+                        [&item.hit.id],
+                        |row| row.get(0),
+                    )
+                    .optional()?
+                } else {
+                    chunk
+                };
+                if let Some(chunk) = chunk {
                     let text: Option<String> =
                         body.query_row([chunk], |row| row.get(0)).optional()?;
                     item.hit.snippet = text.map_or_else(String::new, |text| {
@@ -391,6 +436,22 @@ fn contains_identifier(text: &str, needle: &str) -> bool {
                 .chars()
                 .next()
                 .is_some_and(char_in_code)
+    })
+}
+
+fn command_mentioned(query: &str, command: &str) -> bool {
+    query.match_indices(command).any(|(start, matched)| {
+        let before = &query[..start];
+        let after = &query[start + matched.len()..];
+        if before.ends_with('`') && after.starts_with('`') {
+            return true;
+        }
+        before.ends_with(char::is_whitespace)
+            && matches!(
+                before.split_whitespace().next_back(),
+                Some("mit" | "with" | "using")
+            )
+            && !after.starts_with(|ch: char| ch.is_alphanumeric() || matches!(ch, '-' | '_'))
     })
 }
 

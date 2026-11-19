@@ -1,11 +1,14 @@
 //! Persistent, local hybrid search across documents and desktop settings.
 mod applications;
 mod catalog;
+mod commands;
 mod files;
 mod index;
+mod manuals;
 mod model;
 mod search;
 
+pub use commands::Distro;
 pub use files::FileKind;
 pub use index::{Index, IndexOptions, IndexReport, Status};
 pub use model::{Embedder, InputKind, LocalModel};

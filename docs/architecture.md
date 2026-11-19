@@ -5,6 +5,7 @@ flowchart LR
     CLI[semfind CLI] --> Core[semfind-core]
     Files[Selected files] --> Core
     Catalog[COSMIC catalog] --> Core
+    Commands[Built-in Linux command catalog] --> Core
     Apps[XDG desktop entries] --> Core
     Core -->|Local pipes| Worker[E5 / ONNX Runtime]
     Core --> DB[(SQLite / FTS5 + vectors)]
@@ -12,9 +13,13 @@ flowchart LR
 
 ## Write path
 
-`Index::synchronize` reconciles one explicitly selected root and the versioned built-in settings catalog. It compares hashes of source bytes to skip unchanged content and deletes records missing from the completed scan. A scan failure or embedding error rolls back the transaction. Supported files that cannot be read or extracted are reported and omitted, including any prior contents. The index keeps roots, saved exclusions, source metadata, normalized little-endian float vectors, and FTS5 rows keyed by passage ID. Foreign keys and a delete trigger keep passage and FTS rows aligned.
+`Index::synchronize` reconciles an optionally selected root and the built-in settings and command catalogs. It compares hashes of source bytes to skip unchanged content and deletes records missing from the completed scan. A scan failure or embedding error rolls back the transaction. Supported files that cannot be read or extracted are reported and omitted, including any prior contents. The index keeps roots, saved exclusions, source metadata, normalized little-endian float vectors, and FTS5 rows keyed by passage ID. Foreign keys and a delete trigger keep passage and FTS rows aligned.
 
-`Index::initialize_home` reconciles the home directory and adds registered desktop applications in the same transaction. Entries are keyed by desktop file ID and discovered in XDG preference order, with the user directory first. Application embeddings use the desktop name, description, and keywords.
+`Index::initialize_home` reconciles the home directory, desktop applications, and local commands in the same transaction. Application entries are keyed by desktop file ID and discovered in XDG preference order, with the user directory first. Application embeddings use the desktop name, description, and keywords.
+
+Command embeddings use the command title and bilingual description. Each entry also stores an example and a distribution family. The CLI detects the family at search time so an index can contain both Debian and Arch variants. The distribution filter applies before ranking.
+
+`init` and `index --manpages` refresh locally installed command records. The scan extracts bounded excerpts from command manual sections and records each manual's name and section. Executable names without a manual use lexical-only records. The built-in and local command entries reconcile independently.
 
 Extracted text is broken at nearby word boundaries, up to 640 Unicode characters with about 80 characters of overlap. Embeddings include a clipped title and use E5's `query:` and `passage:` prefixes. Python tokenizes to at most 512 tokens, runs CPU inference and mean-pools unmasked output tokens. Rust checks dimensions and normalizes vectors. The tokenizer and weight checksums plus an encoding recipe version identify the vector space. A different identity requires a separate or rebuilt index.
 

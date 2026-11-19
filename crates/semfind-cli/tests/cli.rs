@@ -1,5 +1,5 @@
-use anyhow::{Result, ensure};
-use semfind_core::{Category, Hit};
+use anyhow::{Context, Result, ensure};
+use semfind_core::{Category, Distro, Hit};
 use std::{
     env, fs,
     path::Path,
@@ -21,14 +21,27 @@ fn success(output: Output) -> Result<Vec<u8>> {
     Ok(output.stdout)
 }
 
+fn has_init_hint(output: &Output) -> bool {
+    String::from_utf8_lossy(&output.stderr).contains("Run `semfind init`")
+}
+
 #[test]
 fn status_json_and_usage_exit_codes() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let index = temp.path().join("index");
-    let status = success(cli(&index).args(["status", "--json"]).output()?)?;
+    let status_output = cli(&index).args(["status", "--json"]).output()?;
+    assert_eq!(has_init_hint(&status_output), cfg!(target_os = "linux"));
+    let status = success(status_output)?;
     let status: serde_json::Value = serde_json::from_slice(&status)?;
     assert_eq!(status["files"], 0, "{status}");
+    assert_eq!(status["commands"], 0, "{status}");
     assert!(status["roots"].as_array().unwrap().is_empty());
+    let search = cli(&index).args(["missing", "--json"]).output()?;
+    assert_eq!(has_init_hint(&search), cfg!(target_os = "linux"));
+    assert_eq!(
+        serde_json::from_slice::<Vec<Hit>>(&success(search)?)?.len(),
+        0
+    );
     assert_eq!(cli(&index).output()?.status.code(), Some(2));
     assert_eq!(
         cli(&index).args(["search"]).output()?.status.code(),
@@ -45,18 +58,180 @@ fn status_json_and_usage_exit_codes() -> Result<()> {
     Ok(())
 }
 
+#[test]
+#[ignore = "requires a local model and Python environment"]
+fn real_model_finds_commands_from_questions_and_filters_distributions() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let index = temp.path().join("index");
+    success(cli(&index).arg("index").output()?)?;
+    let search = |query: &str, family: &str| -> Result<Vec<Hit>> {
+        let output = success(
+            cli(&index)
+                .args([query, "--category", "command", "--distro", family, "--json"])
+                .output()?,
+        )?;
+        Ok(serde_json::from_slice(&output)?)
+    };
+    for (family, distro, example) in [
+        ("debian", Distro::Debian, "sudo apt install ripgrep"),
+        ("arch", Distro::Arch, "sudo pacman -S ripgrep"),
+    ] {
+        let results = search("Wie installiere ich ein neues Paket?", family)?;
+        let best = results.first().context("no command matched the question")?;
+        assert_eq!(best.example.as_deref(), Some(example), "{results:?}");
+        assert_eq!(best.category, Category::Command);
+        assert_eq!(best.distro, Some(distro));
+        assert!(
+            results
+                .iter()
+                .all(|hit| hit.distro == Some(distro) || hit.distro == Some(Distro::Generic))
+        );
+    }
+    for (family, expected) in [("debian", "apt search"), ("arch", "pacman -Ss")] {
+        let results = search("Wie suche ich ein Paket in den Paketquellen?", family)?;
+        assert_eq!(
+            results.first().map(|hit| hit.title.as_str()),
+            Some(expected),
+            "{results:?}"
+        );
+    }
+    let hits = search("Welche Ordner belegen am meisten Speicherplatz?", "generic")?;
+    assert_eq!(
+        hits.first().map(|hit| hit.title.as_str()),
+        Some("du"),
+        "{hits:?}"
+    );
+    assert!(hits.iter().all(|hit| hit.distro == Some(Distro::Generic)));
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires a local model, Python environment and gzip"]
+fn real_model_indexes_manuals_and_executable_names_and_refreshes_them() -> Result<()> {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    let temp = tempfile::tempdir()?;
+    let index = temp.path().join("index");
+    let manuals = temp.path().join("man");
+    let section = manuals.join("man1");
+    let bin = temp.path().join("bin");
+    fs::create_dir_all(&section)?;
+    fs::create_dir(&bin)?;
+    let plain = section.join("samplehash.1");
+    fs::write(
+        &plain,
+        ".TH SAMPLEHASH 1\n.SH NAME\nsamplehash \\- compute SHA-256 checksums\n.SH SYNOPSIS\n.B samplehash\n[\\fIFILE\\fR]...\n.SH DESCRIPTION\nPrint a checksum for a file and verify its integrity.\n",
+    )?;
+    fs::write(
+        section.join("samplehash.1.gz"),
+        success(Command::new("gzip").arg("-c").arg(&plain).output()?)?,
+    )?;
+    fs::remove_file(plain)?;
+    fs::write(section.join("hashshortcut.1"), ".so man1/samplehash.1\n")?;
+    symlink("samplehash.1.gz", section.join("hashalias.1.gz"))?;
+    let executable = bin.join("undocumented-tool");
+    fs::write(&executable, "#!/bin/sh\nexit 0\n")?;
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755))?;
+    let system_path = env::var_os("PATH").unwrap_or_default();
+    let path = env::join_paths(std::iter::once(bin).chain(env::split_paths(&system_path)))?;
+    let run = |args: &[&str]| -> Result<Vec<u8>> {
+        success(
+            cli(&index)
+                .env("MANPATH", &manuals)
+                .env("PATH", &path)
+                .args(args)
+                .output()?,
+        )
+    };
+    let search = |query: &str| -> Result<Vec<Hit>> {
+        Ok(serde_json::from_slice(&run(&[
+            query,
+            "--category",
+            "command",
+            "--json",
+        ])?)?)
+    };
+    run(&["index", "--manpages"])?;
+    for name in ["samplehash", "hashshortcut", "hashalias"] {
+        let results = search(name)?;
+        let hit = results.first().context("manual should be found by name")?;
+        assert!(
+            hit.exact && hit.snippet.contains("compute SHA-256 checksums"),
+            "{hit:?}"
+        );
+        assert!(hit.snippet.contains("samplehash [FILE]"), "{hit:?}");
+        assert_eq!(
+            hit.example.as_deref(),
+            Some(format!("man -- 1 {name}").as_str())
+        );
+    }
+    let result = search("Wie prüfe ich Dateien mit samplehash?")?;
+    let named = result
+        .first()
+        .context("command explicitly mentioned in query")?;
+    assert_eq!(named.title, "samplehash");
+    let other = if named.distro == Some(Distro::Arch) {
+        "debian"
+    } else {
+        "arch"
+    };
+    let foreign: Vec<Hit> = serde_json::from_slice(&run(&[
+        "samplehash",
+        "--category",
+        "command",
+        "--distro",
+        other,
+        "--json",
+    ])?)?;
+    assert!(
+        foreign
+            .iter()
+            .all(|hit| !hit.id.starts_with("command.local."))
+    );
+    let results = search("undocumented-tool")?;
+    let hit = results
+        .first()
+        .context("executable should be found by name")?;
+    assert!(hit.exact && hit.example.is_none(), "{hit:?}");
+    run(&["index"])?;
+    assert!(search("samplehash")?[0].exact);
+
+    fs::remove_file(section.join("samplehash.1.gz"))?;
+    fs::remove_file(section.join("hashshortcut.1"))?;
+    fs::remove_file(section.join("hashalias.1.gz"))?;
+    fs::remove_file(executable)?;
+    run(&["index", "--manpages"])?;
+    for removed in [
+        "samplehash",
+        "hashshortcut",
+        "hashalias",
+        "undocumented-tool",
+    ] {
+        assert!(search(removed)?.iter().all(|hit| hit.title != removed));
+    }
+    Ok(())
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 #[ignore = "requires a local model and Python environment"]
-fn real_model_init_indexes_home_and_refreshes_desktop_applications() -> Result<()> {
+fn real_model_init_indexes_home_desktop_applications_and_manuals() -> Result<()> {
     let temp = tempfile::Builder::new().prefix("semfind-init-").tempdir()?;
     let index = temp.path().join("index");
     let home = temp.path().join("home");
     let user_apps = home.join(".local/share/applications");
     let system_data = temp.path().join("system-share");
     let system_apps = system_data.join("applications");
+    let manual_root = temp.path().join("man");
+    let manual = manual_root.join("man1").join("init-example.1");
     fs::create_dir_all(&user_apps)?;
     fs::create_dir_all(&system_apps)?;
+    fs::create_dir_all(manual_root.join("man1"))?;
+    fs::write(
+        &manual,
+        ".TH INIT-EXAMPLE 1\n.SH NAME\ninit-example \\- examine a sparse file\n.SH SYNOPSIS\n.B init-example\nFILE\n",
+    )?;
     fs::create_dir(home.join("Private"))?;
     fs::write(home.join("notes.txt"), "Document available for search")?;
     fs::write(home.join("Private/secret.txt"), "Excluded document")?;
@@ -80,23 +255,39 @@ fn real_model_init_indexes_home_and_refreshes_desktop_applications() -> Result<(
         system_apps.join("other.desktop"),
         "[Desktop Entry]\nType=Application\nName=Other Viewer\nNotShowIn=COSMIC;\n",
     )?;
-    let run = |args: &[&str]| -> Result<Vec<u8>> {
-        success(
-            cli(&index)
-                .env_remove("XDG_DATA_HOME")
-                .env("HOME", &home)
-                .env("XDG_DATA_DIRS", &system_data)
-                .env("XDG_CURRENT_DESKTOP", "COSMIC")
-                .args(args)
-                .output()?,
-        )
+    let command = || {
+        let mut command = cli(&index);
+        command
+            .env_remove("XDG_DATA_HOME")
+            .env("HOME", &home)
+            .env("XDG_DATA_DIRS", &system_data)
+            .env("XDG_CURRENT_DESKTOP", "COSMIC")
+            .env("MANPATH", &manual_root);
+        command
     };
+    let run = |args: &[&str]| -> Result<Vec<u8>> { success(command().args(args).output()?) };
+    let invalid_manual_root = temp.path().join("not-a-manual-directory");
+    fs::write(&invalid_manual_root, "")?;
+    let failed_init = command()
+        .env("MANPATH", &invalid_manual_root)
+        .arg("init")
+        .output()?;
+    assert_eq!(failed_init.status.code(), Some(1));
+    let after_failure = command().args(["status", "--json"]).output()?;
+    assert!(has_init_hint(&after_failure));
+    let status: serde_json::Value = serde_json::from_slice(&success(after_failure)?)?;
+    assert_eq!(status["files"], 0, "{status}");
+
     run(&["init", "--exclude", "Private"])?;
-    let status: serde_json::Value = serde_json::from_slice(&run(&["status", "--json"])?)?;
+    let status_output = command().args(["status", "--json"]).output()?;
+    assert!(!has_init_hint(&status_output));
+    let status: serde_json::Value = serde_json::from_slice(&success(status_output)?)?;
     assert_eq!(status["roots"], serde_json::json!([home]));
     assert_eq!(status["files"], 1, "{status}");
     assert_eq!(status["applications"], 1, "{status}");
     assert_eq!(status["settings"], 5, "{status}");
+    let commands = status["commands"].as_u64().context("command count")?;
+    assert!(commands > 0);
     let hits: Vec<Hit> = serde_json::from_slice(&run(&[
         "Bildbetrachter",
         "--category",
@@ -107,17 +298,34 @@ fn real_model_init_indexes_home_and_refreshes_desktop_applications() -> Result<(
     assert_eq!(hits[0].category, Category::Application);
     assert_eq!(hits[0].id, "viewer.desktop");
     assert_eq!(hits[0].title, "My Viewer");
+    let manuals: Vec<Hit> = serde_json::from_slice(&run(&[
+        "init-example",
+        "--category",
+        "command",
+        "--limit",
+        "1",
+        "--json",
+    ])?)?;
+    let hit = manuals.first().context("init indexed the local manual")?;
+    assert_eq!(hit.id, "command.local.man.1.init-example");
+    assert!(hit.snippet.contains("examine a sparse file"), "{hit:?}");
+    assert_eq!(hit.example.as_deref(), Some("man -- 1 init-example"));
 
     fs::remove_file(user_apps.join("viewer.desktop"))?;
     fs::remove_file(system_apps.join("viewer.desktop"))?;
+    fs::remove_file(manual)?;
     let report = String::from_utf8(run(&["init"])?)?;
     assert!(
-        report.contains("Written: 0 | Unchanged: 6 | Removed: 1"),
+        report.contains(&format!(
+            "Written: 0 | Unchanged: {} | Removed: 2",
+            5 + commands
+        )),
         "{report}"
     );
     let status: serde_json::Value = serde_json::from_slice(&run(&["status", "--json"])?)?;
     assert_eq!(status["files"], 1, "{status}");
     assert_eq!(status["applications"], 0, "{status}");
+    assert_eq!(status["commands"], commands - 1, "{status}");
     Ok(())
 }
 

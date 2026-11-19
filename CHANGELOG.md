@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.4
+
+- Added a searchable catalog of 31 Linux command entries with German and English descriptions and examples. Package-management results select Debian or Arch variants using the local distribution or the `--distro` override.
+- `semfind init` indexes installed command manuals and executable names from `PATH`. Use `semfind index --manpages` to refresh the local command catalog independently of your home scan.
+- Command results show the relevant manual or a copyable example. `semfind status` reports the command count, and existing indexes migrate automatically.
+- On Linux, regular commands remind users on stderr to run `semfind init` until it completes successfully for the selected index. JSON output stays on stdout.
+
 ## 0.1.3
 
 - Added `semfind init` on Linux to index supported files in the home directory, registered desktop applications, and COSMIC settings in one command. Run it again to refresh all three and reuse saved home exclusions.
