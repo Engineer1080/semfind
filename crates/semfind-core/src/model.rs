@@ -221,3 +221,37 @@ pub(crate) fn normalized(mut vector: Vec<f32>) -> Result<Vec<f32>> {
     }
     Ok(vector)
 }
+
+/// Identify the current local artifacts and encoding recipe without loading the model.
+#[cfg(target_os = "linux")]
+pub fn local_model_revision(directory: &Path) -> Option<[u8; 32]> {
+    use sha2::{Digest, Sha256};
+    use std::{fs, io, os::linux::fs::MetadataExt};
+
+    let mut hash = Sha256::new();
+    hash.update(include_bytes!("worker.py"));
+    for (name, required) in [
+        ("model.onnx", true),
+        ("tokenizer.json", true),
+        ("model.onnx_data", false),
+        ("semfind-model.json", false),
+    ] {
+        let metadata = match fs::metadata(directory.join(name)) {
+            Ok(metadata) if metadata.is_file() => metadata,
+            Err(error) if !required && error.kind() == io::ErrorKind::NotFound => {
+                hash.update([0]);
+                continue;
+            }
+            _ => return None,
+        };
+        hash.update([1]);
+        hash.update(metadata.st_dev().to_le_bytes());
+        hash.update(metadata.st_ino().to_le_bytes());
+        hash.update(metadata.st_size().to_le_bytes());
+        hash.update(metadata.st_mtime().to_le_bytes());
+        hash.update(metadata.st_mtime_nsec().to_le_bytes());
+        hash.update(metadata.st_ctime().to_le_bytes());
+        hash.update(metadata.st_ctime_nsec().to_le_bytes());
+    }
+    Some(hash.finalize().into())
+}

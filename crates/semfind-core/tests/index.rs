@@ -207,6 +207,75 @@ fn image_captions_share_document_search_and_refresh_incrementally() -> Result<()
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn persisted_query_embedding_skips_model_start_and_ranks_current_files() -> Result<()> {
+    let (temp, mut index, root, mut model) = new_fixture()?;
+    let original = fixture(&root, "cold.md", "Cold storage keeps samples fresh.")?;
+    let index_dir = temp.path().join("index");
+    let model_dir = temp.path().join("model");
+    fs::create_dir(&model_dir)?;
+    fs::write(model_dir.join("model.onnx"), "fixture weights")?;
+    fs::write(model_dir.join("tokenizer.json"), "fixture tokenizer")?;
+    index.synchronize(Some(&root), &IndexOptions::default(), &mut model)?;
+    let options = SearchOptions {
+        path: Some(root.clone()),
+        ..Default::default()
+    };
+    let query = "cold storage";
+    let (hits, reused) =
+        index.search_with_cached_query(query, &options, &model_dir, &mut None, || {
+            Ok(FixtureModel {
+                identity: model.identity,
+                fail: false,
+                passages: 0,
+            })
+        })?;
+    assert!(!reused);
+    assert_eq!(hits[0].path.as_ref(), Some(&original));
+    let cache_contents = fs::read_to_string(index_dir.join("last-query.json"))?;
+    assert!(!cache_contents.contains(query));
+    drop(index);
+
+    let mut index = Index::open(&index_dir)?;
+    let search_cached = |index: &Index| {
+        index.search_with_cached_query::<FixtureModel>(
+            query,
+            &options,
+            &model_dir,
+            &mut None,
+            || bail!("an existing cached query should not start its model"),
+        )
+    };
+    let (hits, reused) = search_cached(&index)?;
+    assert!(reused);
+    assert_eq!(hits[0].path.as_ref(), Some(&original));
+
+    let replacement = fixture(&root, "new.md", "The refrigerator supports cold storage.")?;
+    index.synchronize(Some(&root), &IndexOptions::default(), &mut model)?;
+    fs::remove_file(&original)?;
+    let (hits, reused) = search_cached(&index)?;
+    assert!(reused);
+    assert_eq!(hits[0].path.as_ref(), Some(&replacement));
+    assert!(hits.iter().all(|hit| hit.path.as_ref() != Some(&original)));
+
+    fs::write(
+        model_dir.join("tokenizer.json"),
+        "changed tokenizer configuration",
+    )?;
+    let (hits, reused) =
+        index.search_with_cached_query(query, &options, &model_dir, &mut None, || {
+            Ok(FixtureModel {
+                identity: model.identity,
+                fail: false,
+                passages: 0,
+            })
+        })?;
+    assert!(!reused);
+    assert_eq!(hits[0].path.as_ref(), Some(&replacement));
+    Ok(())
+}
+
 #[test]
 fn cached_search_model_initializes_only_when_needed_and_is_reused() -> Result<()> {
     let (_temp, mut index, root, mut indexing_model) = new_fixture()?;

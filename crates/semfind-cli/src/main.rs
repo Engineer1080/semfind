@@ -1,21 +1,27 @@
 use anyhow::{Context, Result, ensure};
-use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum, parser::ValueSource};
 use semfind_core::{
-    Category, Distro, ExecutionDevice, FileKind, FlorenceCaptioner, HitLocation, Index,
-    IndexOptions, IndexReport, Language, LocalModel, SearchOptions,
+    Category, Distro, Embedder, ExecutionDevice, FileKind, FlorenceCaptioner, HitLocation, Index,
+    IndexOptions, IndexReport, InputKind, Language, LocalModel, SearchOptions,
 };
+mod config;
 mod distro;
 mod progress;
+#[cfg(target_os = "linux")]
+mod resident;
 mod ui;
 use distro::DistroFilter;
 use std::{
     env,
     io::{self, BufRead, Write},
+    num::NonZeroU32,
     path::{Path, PathBuf},
     process::ExitCode,
     time::Instant,
 };
 use ui::Messages;
+
+const DEFAULT_DAEMON_IDLE_SECONDS: NonZeroU32 = NonZeroU32::new(15 * 60).unwrap();
 
 #[derive(Parser)]
 #[command(version, about, subcommand_precedence_over_arg = true)]
@@ -50,6 +56,18 @@ struct Cli {
     /// Suppress the GPU setup tip shown during CPU inference.
     #[arg(long, env = "SEMFIND_NO_GPU_HINT", global = true)]
     no_gpu_hint: bool,
+    /// Run search inference in this process and skip the background worker.
+    #[arg(long, env = "SEMFIND_NO_DAEMON", global = true)]
+    no_daemon: bool,
+    /// Stop the background model after this many idle seconds.
+    #[arg(
+        long,
+        env = "SEMFIND_DAEMON_IDLE_SECONDS",
+        default_value_t = DEFAULT_DAEMON_IDLE_SECONDS,
+        value_name = "SECONDS",
+        global = true
+    )]
+    daemon_idle_seconds: NonZeroU32,
     #[command(subcommand)]
     command: Option<Command>,
     #[command(flatten)]
@@ -130,6 +148,29 @@ enum Command {
     Unindex { root: PathBuf },
     /// Search explicitly (use this when the query matches a command name).
     Search(Search),
+    /// Show or change persistent Semfind settings.
+    Config {
+        #[command(subcommand)]
+        setting: Setting,
+    },
+    #[cfg(target_os = "linux")]
+    #[command(hide = true)]
+    ServeModel {
+        directory: PathBuf,
+        #[arg(long)]
+        runtime: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum Setting {
+    /// Show or save the background model timeout in seconds.
+    DaemonIdleSeconds {
+        seconds: Option<NonZeroU32>,
+        /// Restore the built-in default.
+        #[arg(long, conflicts_with = "seconds")]
+        reset: bool,
+    },
 }
 
 #[derive(clap::Args)]
@@ -155,6 +196,9 @@ struct Search {
     /// Report elapsed search time on stderr.
     #[arg(long)]
     time: bool,
+    /// Skip reading or saving the last search's embedding.
+    #[arg(long)]
+    no_cache: bool,
     /// Read one query per line from stdin and write one JSON result array per query.
     #[arg(long, conflicts_with = "query")]
     stdin: bool,
@@ -253,7 +297,15 @@ fn main() -> ExitCode {
     }
     let stdout = io::stdout();
     let mut output = io::BufWriter::new(stdout.lock());
-    match run(cli, &mut output, messages).and_then(|()| Ok(output.flush()?)) {
+    let discover_gpu = matches.value_source("python") != Some(ValueSource::CommandLine);
+    let idle_override = matches!(
+        matches.value_source("daemon_idle_seconds"),
+        Some(ValueSource::CommandLine | ValueSource::EnvVariable)
+    )
+    .then_some(cli.daemon_idle_seconds);
+    match run(cli, &mut output, messages, discover_gpu, idle_override)
+        .and_then(|()| Ok(output.flush()?))
+    {
         Ok(()) => ExitCode::SUCCESS,
         Err(error)
             if error
@@ -272,7 +324,11 @@ fn main() -> ExitCode {
 fn localized_help(messages: &Messages) -> clap::Command {
     let command = Cli::command()
         .about(messages.about)
-        .mut_arg("no_gpu_hint", |arg| arg.help(messages.no_gpu_hint));
+        .mut_arg("no_gpu_hint", |arg| arg.help(messages.no_gpu_hint))
+        .mut_arg("no_daemon", |arg| arg.help(messages.no_daemon))
+        .mut_arg("daemon_idle_seconds", |arg| {
+            arg.help(messages.daemon_idle_seconds)
+        });
     apply_search_help(command, messages)
         .mut_subcommand("init", |sub| {
             sub.about(messages.init)
@@ -299,6 +355,14 @@ fn localized_help(messages: &Messages) -> clap::Command {
         .mut_subcommand("search", |sub| {
             apply_search_help(sub.about(messages.search), messages)
         })
+        .mut_subcommand("config", |sub| {
+            sub.about(messages.config)
+                .mut_subcommand("daemon-idle-seconds", |setting| {
+                    setting
+                        .about(messages.config_daemon_idle)
+                        .mut_arg("reset", |arg| arg.help(messages.config_reset))
+                })
+        })
 }
 
 fn apply_search_help(command: clap::Command, messages: &Messages) -> clap::Command {
@@ -312,6 +376,7 @@ fn apply_search_help(command: clap::Command, messages: &Messages) -> clap::Comma
         ("extension", messages.extension),
         ("limit", messages.limit),
         ("time", messages.time),
+        ("no_cache", messages.no_cache),
         ("stdin", messages.stdin),
     ]
     .into_iter()
@@ -357,7 +422,40 @@ fn print_localized_help(error: clap::Error, messages: &Messages) -> ! {
     std::process::exit(status)
 }
 
-fn run(cli: Cli, output: &mut impl Write, messages: &'static Messages) -> Result<()> {
+fn run(
+    cli: Cli,
+    output: &mut impl Write,
+    messages: &'static Messages,
+    discover_gpu: bool,
+    idle_override: Option<NonZeroU32>,
+) -> Result<()> {
+    if let Some(Command::Config {
+        setting: Setting::DaemonIdleSeconds { seconds, reset },
+    }) = cli.command
+    {
+        let path = config::daemon_idle_path().context(messages.config_dir_missing)?;
+        let seconds = match (seconds, reset) {
+            (Some(seconds), _) => {
+                config::save_daemon_idle(&path, seconds)?;
+                seconds
+            }
+            (None, true) => {
+                config::reset_daemon_idle(&path)?;
+                DEFAULT_DAEMON_IDLE_SECONDS
+            }
+            (None, false) => {
+                config::read_daemon_idle(&path)?.unwrap_or(DEFAULT_DAEMON_IDLE_SECONDS)
+            }
+        };
+        writeln!(output, "{seconds}")?;
+        return Ok(());
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = idle_override;
+    #[cfg(target_os = "linux")]
+    if let Some(Command::ServeModel { directory, runtime }) = &cli.command {
+        return resident::serve(&cli.python, directory, runtime.as_deref());
+    }
     let mut gpu_hint = GpuHint {
         pending: !cli.no_gpu_hint,
         messages,
@@ -401,7 +499,52 @@ fn run(cli: Cli, output: &mut impl Write, messages: &'static Messages) -> Result
         DeviceChoice::Cuda => ExecutionDevice::Cuda,
         DeviceChoice::Migraphx => ExecutionDevice::Migraphx,
     };
-    let start_model = || LocalModel::start_on(&cli.python, &model_directory()?, device);
+    let runtime_dir = if discover_gpu {
+        data_dir(messages).ok().map(|path| path.join("runtime"))
+    } else {
+        None
+    };
+    let start_model = || {
+        start_text_model(
+            &cli.python,
+            &model_directory()?,
+            device,
+            runtime_dir.as_deref(),
+        )
+    };
+    let cache_model_directory = || {
+        if discover_gpu && matches!(device, ExecutionDevice::Auto) {
+            model_directory().ok()
+        } else {
+            None
+        }
+    };
+    let start_search_model = |allow_resident: bool| -> Result<SearchModel> {
+        #[cfg(target_os = "linux")]
+        if allow_resident
+            && !cli.no_daemon
+            && let Some(directory) = cache_model_directory()
+        {
+            let idle = idle_override.unwrap_or_else(|| {
+                if let Some(path) = config::daemon_idle_path() {
+                    match config::read_daemon_idle(&path) {
+                        Ok(Some(seconds)) => return seconds,
+                        Ok(None) => {}
+                        Err(error) => eprintln!("semfind: {error:#}"),
+                    }
+                }
+                DEFAULT_DAEMON_IDLE_SECONDS
+            });
+            if let Ok(model) =
+                resident::Client::connect(&cli.python, &directory, runtime_dir.as_deref(), idle)
+            {
+                return Ok(SearchModel::Resident(model));
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = allow_resident;
+        start_model().map(SearchModel::Local)
+    };
     let caption_directory = || -> Result<PathBuf> {
         match &cli.caption_model_dir {
             Some(path) => Ok(path.clone()),
@@ -464,8 +607,8 @@ fn run(cli: Cli, output: &mut impl Write, messages: &'static Messages) -> Result
                 None => None,
             };
             let progress = progress::Progress::start(messages);
-            let mut model = start_init_model(&cli.python, &model_directory()?, device, messages)?;
-            gpu_hint.show(&model, progress.is_some());
+            let mut model = start_model()?;
+            gpu_hint.show(model.uses_cpu(), progress.is_some());
             let initialize = if force {
                 Index::rebuild_home_with_progress
             } else {
@@ -490,7 +633,7 @@ fn run(cli: Cli, output: &mut impl Write, messages: &'static Messages) -> Result
             );
             let timing = timing.map(progress::Timing::finish);
             drop(progress);
-            gpu_hint.show(&model, false);
+            gpu_hint.show(model.uses_cpu(), false);
             let report = report?;
             if let Some(timing) = timing {
                 eprintln!(
@@ -512,7 +655,7 @@ fn run(cli: Cli, output: &mut impl Write, messages: &'static Messages) -> Result
                 exclude: (clear_excludes || !exclude.is_empty()).then_some(exclude),
             };
             let mut model = start_model()?;
-            gpu_hint.show(&model, false);
+            gpu_hint.show(model.uses_cpu(), false);
             let report = if caption_images {
                 let directory = caption_directory()?;
                 let mut captioner = FlorenceCaptioner::new(&cli.python, &directory)?;
@@ -533,14 +676,34 @@ fn run(cli: Cli, output: &mut impl Write, messages: &'static Messages) -> Result
             } else {
                 index.synchronize(root.as_deref(), &options, &mut model)?
             };
-            gpu_hint.show(&model, false);
+            gpu_hint.show(model.uses_cpu(), false);
             print_index_report(output, &report, messages)?;
         }
         Some(Command::Search(mut search)) => {
             search.time |= cli.search.time;
-            run_search(&index, search, start_model, output, messages, gpu_hint)?;
+            search.no_cache |= cli.search.no_cache;
+            run_search(
+                &index,
+                search,
+                start_search_model,
+                cache_model_directory(),
+                output,
+                messages,
+                gpu_hint,
+            )?;
         }
-        None => run_search(&index, cli.search, start_model, output, messages, gpu_hint)?,
+        None => run_search(
+            &index,
+            cli.search,
+            start_search_model,
+            cache_model_directory(),
+            output,
+            messages,
+            gpu_hint,
+        )?,
+        Some(Command::Config { .. }) => unreachable!(),
+        #[cfg(target_os = "linux")]
+        Some(Command::ServeModel { .. }) => unreachable!(),
     }
     Ok(())
 }
@@ -551,8 +714,8 @@ struct GpuHint<'a> {
 }
 
 impl GpuHint<'_> {
-    fn show(&mut self, model: &LocalModel, progress_active: bool) {
-        if !self.pending || !model.uses_cpu() {
+    fn show(&mut self, uses_cpu: bool, progress_active: bool) {
+        if !self.pending || !uses_cpu {
             return;
         }
         self.pending = false;
@@ -566,14 +729,15 @@ impl GpuHint<'_> {
     }
 }
 
-fn start_init_model(
+fn start_text_model(
     python: &Path,
     directory: &Path,
     device: ExecutionDevice,
-    messages: &Messages,
+    runtime_dir: Option<&Path>,
 ) -> Result<LocalModel> {
-    if matches!(device, ExecutionDevice::Auto) {
-        let runtime_dir = data_dir(messages)?.join("runtime");
+    if matches!(device, ExecutionDevice::Auto)
+        && let Some(runtime_dir) = runtime_dir
+    {
         for (name, backend) in [
             ("cuda", ExecutionDevice::Cuda),
             ("migraphx", ExecutionDevice::Migraphx),
@@ -621,10 +785,68 @@ fn print_index_report(
     Ok(())
 }
 
+enum SearchModel {
+    Local(LocalModel),
+    #[cfg(target_os = "linux")]
+    Resident(resident::Client),
+}
+
+impl SearchModel {
+    fn provider(&self) -> (&str, &str) {
+        match self {
+            Self::Local(model) => ("startup", model.initial_provider()),
+            #[cfg(target_os = "linux")]
+            Self::Resident(model) => {
+                let state = if model.reused() {
+                    "resident"
+                } else {
+                    "startup"
+                };
+                (state, model.provider())
+            }
+        }
+    }
+
+    fn uses_cpu(&self) -> bool {
+        match self {
+            Self::Local(model) => model.uses_cpu(),
+            #[cfg(target_os = "linux")]
+            Self::Resident(model) => model.uses_cpu(),
+        }
+    }
+
+    fn embedder(&self) -> &dyn Embedder {
+        match self {
+            Self::Local(model) => model,
+            #[cfg(target_os = "linux")]
+            Self::Resident(model) => model,
+        }
+    }
+}
+
+impl Embedder for SearchModel {
+    fn identity(&self) -> &str {
+        self.embedder().identity()
+    }
+
+    fn minimum_similarity(&self) -> Option<f32> {
+        self.embedder().minimum_similarity()
+    }
+
+    fn encode(&mut self, kind: InputKind, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        match self {
+            Self::Local(model) => model.encode(kind, texts),
+            #[cfg(target_os = "linux")]
+            Self::Resident(model) => model.encode(kind, texts),
+        }
+    }
+}
+
 fn run_search(
     index: &Index,
     search: Search,
-    start_model: impl Fn() -> Result<LocalModel>,
+    start_model: impl Fn(bool) -> Result<SearchModel>,
+    model_directory: Option<PathBuf>,
     output: &mut impl Write,
     messages: &Messages,
     mut gpu_hint: GpuHint<'_>,
@@ -641,15 +863,44 @@ fn run_search(
         limit: search.limit as usize,
     };
     let mut model = None;
+    let cache_directory = model_directory
+        .as_deref()
+        .filter(|_| !search.stdin && !search.no_cache);
     let mut find = |query: &str| -> Result<_> {
         let started = search.time.then(Instant::now);
-        let hits = index.search_with_cached_model(query, &options, &mut model, &start_model)?;
+        let starting_model = model.is_none();
+        let search_once = |model: &mut Option<_>, allow_resident| {
+            let start = || start_model(allow_resident);
+            if let Some(directory) = cache_directory {
+                index.search_with_cached_query(query, &options, directory, model, start)
+            } else {
+                index
+                    .search_with_cached_model(query, &options, model, start)
+                    .map(|hits| (hits, false))
+            }
+        };
+        let result = search_once(&mut model, !search.stdin);
+        #[cfg(target_os = "linux")]
+        let result = match result {
+            Err(error) if error.is::<resident::Disconnected>() => {
+                model = None;
+                search_once(&mut model, false)
+            }
+            result => result,
+        };
+        let (hits, cache_hit) = result?;
         if let Some(started) = started {
             let milliseconds = started.elapsed().as_secs_f64() * 1000.0;
             eprintln!("semfind: {} {milliseconds:.2} ms", messages.search_time);
+            if cache_hit {
+                eprintln!("semfind: {}", messages.cache_hit);
+            } else if starting_model && let Some(model) = &model {
+                let (state, provider) = model.provider();
+                eprintln!("semfind: ONNX Runtime ({state}): {provider}");
+            }
         }
         if let Some(model) = &model {
-            gpu_hint.show(model, false);
+            gpu_hint.show(model.uses_cpu(), false);
         }
         Ok(hits)
     };

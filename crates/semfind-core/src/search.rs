@@ -102,6 +102,9 @@ struct QueryEmbedding {
     minimum_similarity: Option<f32>,
 }
 
+#[cfg(target_os = "linux")]
+mod query_cache;
+
 impl Index {
     /// Search persisted contents with BM25, cosine similarity and reciprocal rank fusion.
     /// An empty query lists files alphabetically when a file kind is selected.
@@ -135,12 +138,50 @@ impl Index {
         start_model: impl FnOnce() -> Result<M>,
     ) -> Result<Vec<Hit>> {
         self.search_with_encoder(query, options, |conn, query| {
-            let model = match model {
-                Some(model) => model,
-                None => model.insert(start_model()?),
-            };
-            encode_query(conn, query, model)
+            encode_with_cached_model(conn, query, model, start_model)
         })
+    }
+
+    /// Reuse the last query embedding stored in the private index directory.
+    /// Results are ranked against the current index and file access checks.
+    pub fn search_with_cached_query<M: Embedder>(
+        &self,
+        query: &str,
+        options: &SearchOptions,
+        model_directory: &Path,
+        model: &mut Option<M>,
+        start_model: impl FnOnce() -> Result<M>,
+    ) -> Result<(Vec<Hit>, bool)> {
+        #[cfg(target_os = "linux")]
+        {
+            let Some(cache) = query_cache::QueryCache::new(&self.conn, model_directory) else {
+                return self
+                    .search_with_cached_model(query, options, model, start_model)
+                    .map(|hits| (hits, false));
+            };
+            let mut cache_hit = false;
+            let hits = self.search_with_encoder(query, options, |conn, query| {
+                let key = cache.key(conn, query)?;
+                if let Some(vector) = key.and_then(|key| cache.load(conn, key)) {
+                    cache_hit = true;
+                    return Ok(vector);
+                }
+                let embedding = encode_with_cached_model(conn, query, model, start_model)?;
+                if let Some(key) = key
+                    && cache.key(conn, query)? == Some(key)
+                {
+                    cache.store(key, &embedding);
+                }
+                Ok(embedding)
+            })?;
+            Ok((hits, cache_hit))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = model_directory;
+            self.search_with_cached_model(query, options, model, start_model)
+                .map(|hits| (hits, false))
+        }
     }
 
     fn search_with_encoder(
@@ -174,6 +215,47 @@ impl Index {
         let tx = self.conn.unchecked_transaction()?;
         let mut candidates = HashMap::new();
         let needle = query.to_lowercase();
+        let mut category = options.category;
+        let mut semantic_query = query;
+        let mut lexical_query = query;
+        let mut chat_task = false;
+        if category.is_none_or(|category| category == Category::Application)
+            && options.file_kind.is_none()
+            && path.is_none()
+            && extension.is_none()
+            && let Some(task) = application_task(&needle)
+            && !tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sources
+                 WHERE (key = ?1 COLLATE NOCASE OR title = ?1 COLLATE NOCASE)
+                   AND (?2 IS NULL OR category = ?2))",
+                params![query, category.map(Category::as_str)],
+                |row| row.get::<_, bool>(0),
+            )?
+        {
+            category = Some(Category::Application);
+            chat_task = matches!(
+                task,
+                "chat"
+                    | "chatten"
+                    | "chatting"
+                    | "messenger"
+                    | "instant messaging"
+                    | "charlar"
+                    | "chatear"
+                    | "chatter"
+                    | "discuter"
+                    | "conversar"
+                    | "chattare"
+                    | "общения"
+            );
+            semantic_query = if chat_task { "chat messenger" } else { task };
+            lexical_query = if chat_task {
+                "chat chatten chatting messenger messaging instantmessaging sofortnachrichten \
+                 messagerie mensajería mensagens messaggistica мессенджер"
+            } else {
+                task
+            };
+        }
         {
             let mut statement = tx.prepare(
                 "SELECT id,key,category,title,root,extension,desktop,setting_group,
@@ -184,7 +266,7 @@ impl Index {
                    AND (?4 OR key NOT GLOB ?5)",
             )?;
             let mut rows = statement.query(params![
-                options.category.map(Category::as_str),
+                category.map(Category::as_str),
                 extension,
                 options.distro.map(Distro::as_str),
                 options.include_local_commands,
@@ -276,7 +358,7 @@ impl Index {
             && query
                 .chars()
                 .any(|part| part.is_numeric() || matches!(part, '-' | '_' | '.'));
-        if let Some(expression) = fts_expression(query, identifier) {
+        if let Some(expression) = fts_expression(lexical_query, identifier) {
             let mut statement = tx.prepare(
                 "SELECT chunks.source, chunks.id, fulltext.body FROM fulltext
                  JOIN chunks ON chunks.id=fulltext.rowid
@@ -305,6 +387,9 @@ impl Index {
                 }
             }
         }
+        if chat_task {
+            candidates.retain(|_, item| item.lexical_chunk.is_some());
+        }
         let file_kind = options
             .file_kind
             .or_else(|| extension.as_deref().and_then(FileKind::from_extension));
@@ -322,9 +407,10 @@ impl Index {
                 let bytes = row.get_ref(2)?.as_blob()?;
                 let embedding = match &query_embedding {
                     Some(embedding) => embedding,
-                    None => {
-                        query_embedding.insert(encode.take().expect("first embedding")(&tx, query)?)
-                    }
+                    None => query_embedding.insert(encode.take().expect("first embedding")(
+                        &tx,
+                        semantic_query,
+                    )?),
                 };
                 let score = similarity(&embedding.vector, bytes)?;
                 if embedding.minimum_similarity.is_none_or(|min| score >= min)
@@ -422,6 +508,19 @@ impl Index {
     }
 }
 
+fn encode_with_cached_model<M: Embedder>(
+    conn: &Connection,
+    query: &str,
+    model: &mut Option<M>,
+    start_model: impl FnOnce() -> Result<M>,
+) -> Result<QueryEmbedding> {
+    let model = match model {
+        Some(model) => model,
+        None => model.insert(start_model()?),
+    };
+    encode_query(conn, query, model)
+}
+
 fn encode_query(
     conn: &Connection,
     query: &str,
@@ -436,6 +535,43 @@ fn encode_query(
         vector: normalized(vectors.pop().expect("one vector"))?,
         minimum_similarity: model.minimum_similarity(),
     })
+}
+
+fn application_task(query: &str) -> Option<&str> {
+    let prefixes = [
+        "ein programm zum ",
+        "ein programm für ",
+        "eine anwendung zum ",
+        "eine anwendung für ",
+        "eine app zum ",
+        "eine app für ",
+        "ich suche ein programm zum ",
+        "ich suche eine app zum ",
+        "a program to ",
+        "a program for ",
+        "an application to ",
+        "an application for ",
+        "an app to ",
+        "an app for ",
+        "i need an app to ",
+        "une application pour ",
+        "un programme pour ",
+        "una aplicación para ",
+        "un programa para ",
+        "uma aplicação para ",
+        "um aplicativo para ",
+        "um programa para ",
+        "un’app per ",
+        "un'app per ",
+        "un programma per ",
+        "приложение для ",
+        "программа для ",
+    ];
+    prefixes
+        .iter()
+        .find_map(|prefix| query.strip_prefix(prefix))
+        .map(|task| task.trim().trim_end_matches(['?', '!', '.']).trim_end())
+        .filter(|task| task.chars().any(char::is_alphanumeric))
 }
 
 fn fts_expression(query: &str, identifier: bool) -> Option<String> {

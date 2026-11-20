@@ -16,7 +16,9 @@ fn cli(index: &Path) -> Command {
         .arg("--index-dir")
         .arg(index)
         .env("LC_ALL", "C")
-        .env_remove("SEMFIND_NO_GPU_HINT");
+        .env("XDG_CONFIG_HOME", index.with_file_name("config"))
+        .env_remove("SEMFIND_NO_GPU_HINT")
+        .env_remove("SEMFIND_DAEMON_IDLE_SECONDS");
     command
 }
 
@@ -71,6 +73,69 @@ fn status_json_and_usage_exit_codes() -> Result<()> {
             .code(),
         Some(1)
     );
+    Ok(())
+}
+
+#[test]
+fn daemon_idle_seconds_defaults_to_fifteen_minutes_and_accepts_positive_overrides() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let index = temp.path().join("index");
+    let help = String::from_utf8(success(cli(&index).arg("--help").output()?)?)?;
+    assert!(help.contains("--daemon-idle-seconds <SECONDS>"));
+    assert!(help.contains("SEMFIND_DAEMON_IDLE_SECONDS"));
+    assert!(help.contains("[default: 900]"));
+    let invalid = cli(&index)
+        .env("SEMFIND_DAEMON_IDLE_SECONDS", "0")
+        .args(["status", "--json"])
+        .output()?;
+    assert_eq!(invalid.status.code(), Some(2));
+    let override_env = cli(&index)
+        .env("SEMFIND_DAEMON_IDLE_SECONDS", "120")
+        .args(["search", "missing", "--daemon-idle-seconds", "1", "--json"])
+        .output()?;
+    assert_eq!(
+        serde_json::from_slice::<Vec<Hit>>(&success(override_env)?)?.len(),
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn config_saves_shows_and_resets_the_timeout_without_opening_the_index() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let index = temp.path().join("index");
+    let home_config = temp.path().join(".config/semfind/daemon-idle-seconds");
+    let xdg_config = temp.path().join("config/semfind/daemon-idle-seconds");
+    let config = || {
+        let mut command = cli(&index);
+        command
+            .env("HOME", temp.path())
+            .args(["config", "daemon-idle-seconds"]);
+        command
+    };
+    assert_eq!(success(config().output()?)?, b"900\n");
+    assert_eq!(success(config().arg("300").output()?)?, b"300\n");
+    assert_eq!(fs::read(&xdg_config)?, b"300\n");
+    let overridden = config()
+        .env("SEMFIND_DAEMON_IDLE_SECONDS", "120")
+        .output()?;
+    assert_eq!(success(overridden)?, b"300\n");
+    assert_eq!(config().arg("0").output()?.status.code(), Some(2));
+    assert_eq!(success(config().output()?)?, b"300\n");
+    assert_eq!(success(config().arg("--reset").output()?)?, b"900\n");
+    assert!(!xdg_config.exists());
+    assert_eq!(success(config().output()?)?, b"900\n");
+
+    assert_eq!(
+        success(config().env_remove("XDG_CONFIG_HOME").arg("120").output()?)?,
+        b"120\n"
+    );
+    assert_eq!(fs::read(&home_config)?, b"120\n");
+    assert_eq!(
+        success(config().env("XDG_CONFIG_HOME", "relative").output()?)?,
+        b"120\n"
+    );
+    assert!(!index.exists());
     Ok(())
 }
 
@@ -191,17 +256,37 @@ fn terminal_messages_follow_locale_without_changing_json() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let index = temp.path().join("index");
     for (locale, usage, description, files) in [
-        ("de_DE.UTF-8", "Aufruf:", "Lokale Datei-", "Dateien:"),
-        ("ru_RU.UTF-8", "Использование:", "Локальный поиск", "Файлы:"),
-        ("pt_BR.UTF-8", "Uso:", "Busca local", "Arquivos:"),
+        (
+            "de_DE.UTF-8",
+            "Aufruf:",
+            "Lokale semantische Suche",
+            "Dateien:",
+        ),
+        (
+            "ru_RU.UTF-8",
+            "Использование:",
+            "Локальный семантический поиск",
+            "Файлы:",
+        ),
+        ("pt_BR.UTF-8", "Uso:", "Busca semântica local", "Arquivos:"),
         (
             "fr_CA.UTF-8",
             "Utilisation:",
-            "Recherche locale",
+            "Recherche sémantique locale",
             "Fichiers:",
         ),
-        ("es_MX.UTF-8", "Uso:", "Búsqueda local", "Archivos:"),
-        ("it_IT.UTF-8", "Utilizzo:", "Ricerca locale", "File:"),
+        (
+            "es_MX.UTF-8",
+            "Uso:",
+            "Búsqueda semántica local",
+            "Archivos:",
+        ),
+        (
+            "it_IT.UTF-8",
+            "Utilizzo:",
+            "Ricerca semantica locale",
+            "File:",
+        ),
     ] {
         let command = || {
             let mut command = cli(&index);
@@ -654,6 +739,104 @@ fn real_model_init_indexes_home_desktop_applications_and_manuals() -> Result<()>
     assert_eq!(hits[0].snippet, "Document available for search");
     let after_failure: serde_json::Value = serde_json::from_slice(&run(&["status", "--json"])?)?;
     assert_eq!(after_failure, before);
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires a local model and Python environment"]
+fn real_model_explicit_chat_requests_find_installed_messengers() -> Result<()> {
+    let temp = tempfile::Builder::new()
+        .prefix("semfind-chat-app-")
+        .tempdir()?;
+    let index = temp.path().join("index");
+    let home = temp.path().join("home");
+    let empty = temp.path().join("empty");
+    let data = temp.path().join("data");
+    let apps = data.join("applications");
+    fs::create_dir(&home)?;
+    fs::create_dir(&empty)?;
+    fs::create_dir_all(&apps)?;
+    let messenger = apps.join("voices.desktop");
+    fs::write(
+        &messenger,
+        "[Desktop Entry]\nType=Application\nName=Voices\nComment=Voice and text chat\nGenericName=Internet Messenger\n",
+    )?;
+    fs::write(
+        apps.join("store.desktop"),
+        "[Desktop Entry]\nType=Application\nName=App Store\nComment=Programme installieren und aktualisieren\n",
+    )?;
+    let filename = "Ein Programm zum Chatten.md";
+    fs::write(home.join(filename), "A document about chat applications.")?;
+    let command = || {
+        let mut command = cli(&index);
+        command
+            .env("HOME", &home)
+            .env("XDG_DATA_HOME", &data)
+            .env("XDG_DATA_DIRS", &empty)
+            .env("MANPATH", &empty)
+            .env("PATH", &empty);
+        command
+    };
+    let run = |args: &[&str]| -> Result<Vec<u8>> { success(command().args(args).output()?) };
+    run(&["init", "--no-caption-images"])?;
+    for query in ["Ein Programm zum Chatten", "An app for chatting?"] {
+        let hits: Vec<Hit> = serde_json::from_slice(&run(&[query, "--json"])?)?;
+        assert_eq!(hits.len(), 1, "{hits:?}");
+        assert_eq!(hits[0].id, "voices.desktop");
+        assert_eq!(hits[0].category, Category::Application);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let cuda = data.join("semfind/runtime/cuda/bin/python");
+        fs::create_dir_all(cuda.parent().unwrap())?;
+        fs::write(
+            &cuda,
+            "#!/bin/sh\n[ \"$6\" = cuda-auto ] || exit 64\nprintf '%s\\n' '{\"error\":\"test CUDA unavailable\"}'\n",
+        )?;
+        fs::set_permissions(&cuda, fs::Permissions::from_mode(0o700))?;
+        let auto = command()
+            .env("SEMFIND_DEVICE", "auto")
+            .args([
+                "Ein Programm zum Chatten",
+                "--json",
+                "--time",
+                "--no-daemon",
+                "--no-cache",
+            ])
+            .output()?;
+        let stderr = String::from_utf8_lossy(&auto.stderr);
+        assert!(stderr.contains("test CUDA unavailable"), "{stderr}");
+        assert!(stderr.contains("ONNX Runtime (startup): CPUExecutionProvider"));
+        let hits: Vec<Hit> = serde_json::from_slice(&success(auto)?)?;
+        assert_eq!(hits[0].id, "voices.desktop");
+
+        let python = env::var_os("SEMFIND_PYTHON").context("set SEMFIND_PYTHON")?;
+        let explicit = command()
+            .env("SEMFIND_DEVICE", "auto")
+            .args(["search", "Ein Programm zum Chatten", "--json", "--python"])
+            .arg(python)
+            .output()?;
+        assert!(!String::from_utf8_lossy(&explicit.stderr).contains("test CUDA unavailable"));
+        let hits: Vec<Hit> = serde_json::from_slice(&success(explicit)?)?;
+        assert_eq!(hits[0].id, "voices.desktop");
+    }
+    let exact: Vec<Hit> = serde_json::from_slice(&run(&[filename, "--json"])?)?;
+    assert_eq!(exact[0].title, filename);
+    assert!(exact[0].exact);
+    let filtered: Vec<Hit> = serde_json::from_slice(&run(&[
+        "Ein Programm zum Chatten",
+        "--category",
+        "file",
+        "--json",
+    ])?)?;
+    assert_eq!(filtered[0].category, Category::File);
+
+    fs::remove_file(messenger)?;
+    run(&["init", "--no-caption-images"])?;
+    let none: Vec<Hit> = serde_json::from_slice(&run(&["Ein Programm zum Chatten", "--json"])?)?;
+    assert!(none.is_empty(), "{none:?}");
     Ok(())
 }
 

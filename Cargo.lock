@@ -345,19 +345,21 @@ dependencies = [
 
 [[package]]
 name = "semfind-cli"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "clap",
+ "rustix",
  "semfind-core",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
 ]
 
 [[package]]
 name = "semfind-core"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "rusqlite",
@@ -371,7 +373,7 @@ dependencies = [
 
 [[package]]
 name = "semfind-cosmic"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "semfind-core",

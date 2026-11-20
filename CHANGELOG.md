@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.8
+
+- Interpret explicit requests such as `Ein Programm zum Chatten` as searches for installed applications. Match common chat and messenger terms across languages to keep unrelated results out of chat application searches.
+- Describe Semfind as a semantic search CLI in the README, package metadata, and localized help.
+- Discover configured CUDA and AMD MIGraphX runtimes for regular searches and manual indexing as well as `init`. Timed searches report the startup provider when they load the model.
+- Reuse the last query embedding across standalone searches on Linux. Rank the current index on each lookup and skip the cache with `--no-cache`.
+- Keep the search model loaded in a local background worker across separate Linux searches. The worker exits after 15 idle minutes by default. Set the timeout with `--daemon-idle-seconds` or `SEMFIND_DAEMON_IDLE_SECONDS` and bypass the worker with `--no-daemon`.
+- Save, show, or reset the per-user background worker timeout with `semfind config daemon-idle-seconds`.
+
 ## 0.2.7
 
 - Let `semfind init` use dedicated NVIDIA CUDA or AMD MIGraphX Python environments automatically, with CPU fallback. `init --time` also reports the ONNX Runtime provider selected at startup.

@@ -31,7 +31,7 @@ Semfind 0.1.7 ran with ONNX Runtime 1.32.0 on a Ryzen 7 5800X3D and a GeForce RT
 | Warm search, median / p95 | 7.01 / 8.45 ms | 3.75 / 4.57 ms |
 | Cold search, median | 1.735 s | 2.013 s |
 
-CUDA took about one sixth of the CPU time for indexing and about half the time for a search with the model already loaded. The cold search includes starting a new worker and initializing the backend. The CLI starts a new worker for each invocation that needs embeddings.
+CUDA took about one sixth of the CPU time for indexing and about half the time for a search with the model already loaded. The cold search includes starting a new worker and initializing the backend. Since Semfind 0.2.8, separate CLI searches in automatic mode can reuse a running worker.
 
 ## Method
 

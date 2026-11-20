@@ -1,8 +1,8 @@
 # semfind
 
-semfind is an offline search CLI for Linux. Search in everyday language to find files, installed applications, COSMIC settings, and Linux commands. Use `--json` for structured results in scripts, applications, and AI agents.
+**Semfind is an offline semantic search CLI for Linux.** Describe what you want to find in everyday language. Semfind searches file contents, installed applications, COSMIC settings, and Linux commands. Use `--json` for structured results in scripts, applications, and AI agents.
 
-Linux filename search helps when you know what a file is called. Full-text search helps when you remember its wording. semfind also compares the meaning of a query with document passages. A German question can retrieve an English document, and an exact filename, settings ID, or error code still takes priority.
+Semfind uses local multilingual embeddings to match queries by meaning. A German question can retrieve an English document. It combines semantic similarity with full-text search and gives priority to exact filenames, settings IDs, and error codes.
 
 ## What works
 
@@ -36,6 +36,22 @@ Existing indexes remain searchable after Semfind 0.2.1 automatically upgrades th
 With `--json`, search writes a JSON array to stdout, including `[]` for zero results. Diagnostics go to stderr. Exit codes are `0` for success (including zero hits), `1` for an operational error, and `2` for invalid CLI usage.
 
 Add `--time` to report the search duration in milliseconds on stderr. Measurement starts after the index is opened and includes model startup when needed, retrieval, and ranking. Result formatting is outside the measurement.
+
+On Linux, standalone searches in automatic mode can reuse the last query embedding from the selected index directory. Semfind still ranks the current index and checks that file hits are accessible. `--time` reports a cache hit, and `--no-cache` skips reading and saving the cached embedding for one invocation.
+
+When a standalone search needs a new embedding, Semfind on Linux starts a local background worker on demand. By default, the worker keeps the selected model loaded for 15 minutes after the last embedding. It uses automatic CUDA, MIGraphX, and CPU selection. `--time` shows `ONNX Runtime (resident)` when a search uses an already loaded model.
+
+Save a five-minute timeout for future searches, show the saved value, or restore the 15-minute default.
+
+```bash
+semfind config daemon-idle-seconds 300
+semfind config daemon-idle-seconds
+semfind config daemon-idle-seconds --reset
+```
+
+Semfind stores this setting in `$XDG_CONFIG_HOME/semfind/daemon-idle-seconds` (by default `~/.config/semfind/daemon-idle-seconds`). The value survives a restart. The `--daemon-idle-seconds` flag takes precedence over `SEMFIND_DAEMON_IDLE_SECONDS`, which takes precedence over the saved value. The worker uses the setting when it computes the next embedding. A cached query leaves the current timer running. Use `--no-cache` to compute a new embedding for a repeated query.
+
+Use `--no-daemon` or `SEMFIND_NO_DAEMON=true` to run inference directly. Semfind also runs inference directly when you select CPU, CUDA, or MIGraphX explicitly, pass `--python`, or when the worker is unavailable. For cold-start comparisons, combine `--no-daemon` with `--no-cache`.
 
 ```bash
 semfind "How do I show free disk space?" --category command --json --time
@@ -118,7 +134,7 @@ Changes to the weights, tokenizer, or encoding settings require a full rebuild o
 
 ### Run inference on an NVIDIA GPU
 
-For automatic CUDA use during `semfind init`, create a dedicated Python environment under the Semfind data directory. Check that `nvidia-smi` can see the GPU. The PyPI build below requires a driver that supports CUDA 13 and installs the CUDA and cuDNN runtime libraries through pip. [ONNX Runtime CUDA requirements](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html#requirements)
+For automatic CUDA use, create a dedicated Python environment under the Semfind data directory. Check that `nvidia-smi` can see the GPU. The PyPI build below requires a driver that supports CUDA 13 and installs the CUDA and cuDNN runtime libraries through pip. [ONNX Runtime CUDA requirements](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html#requirements)
 
 ```bash
 cuda_runtime="${XDG_DATA_HOME:-$HOME/.local/share}/semfind/runtime/cuda"
@@ -127,15 +143,15 @@ python3 -m venv "$cuda_runtime"
 semfind init --time
 ```
 
-With the default `--device auto`, `init` first tries dedicated runtimes in `runtime/cuda` and `runtime/migraphx` under the Semfind data directory, in that order. You can symlink either directory to an existing virtual environment. If neither dedicated GPU starts, Semfind uses its configured Python environment and tries CUDA, MIGraphX, then CPU as available. A GPU inference error in automatic mode retries on the CPU. `init --time` reports the provider selected at startup. Florence-2 continues to use the configured Python environment and CPU captioning.
+With the default `--device auto`, search and indexing first try dedicated runtimes in `runtime/cuda` and `runtime/migraphx` under the Semfind data directory, in that order. You can symlink either directory to an existing virtual environment. If neither dedicated GPU starts, Semfind uses its configured Python environment and tries CUDA, MIGraphX, then CPU as available. A GPU inference error in automatic mode retries on the CPU. `--time` reports the provider selected when the embedding model starts. Florence-2 uses the configured Python environment and CPU captioning.
 
 When a search or indexing command uses the CPU for text embeddings, Semfind prints a performance tip with CUDA and MIGraphX setup links on stderr once per invocation. Use `--no-gpu-hint` to suppress it for one invocation, or set `SEMFIND_NO_GPU_HINT=true` for your environment.
 
-For searches, manual indexes, or an explicit `--device` selection, use `--python` or `SEMFIND_PYTHON` to select the desired Python environment. Use `--device cpu` to force CPU inference or `--device cuda` to require CUDA. You can also set `SEMFIND_DEVICE`. The same model and weights can reuse an index on another backend. Tokenization, filesystem scanning, SQLite, and search ranking run on the CPU. On the tested RTX 4080 SUPER, CUDA sped up index building and searches with a running model worker. Individual semantic searches in the CLI took longer because each starts a new CUDA session. [CPU and CUDA benchmark](benchmarks/retrieval/README.md#granite-97m-cpu-and-cuda-results)
+Use `--python` to select a specific interpreter for one invocation. `SEMFIND_PYTHON` sets the default interpreter, including the fallback in automatic mode. Use `--device cpu` to force CPU inference or `--device cuda` to require CUDA in the selected interpreter. You can also set `SEMFIND_DEVICE`. The same model and weights can reuse an index on another backend. Tokenization, filesystem scanning, SQLite, and search ranking run on the CPU. On the tested RTX 4080 SUPER, CUDA sped up index building and searches with a running model worker. A cold CUDA session took longer to start than a CPU session. Automatic searches can now reuse a running session across invocations. [CPU and CUDA benchmark](benchmarks/retrieval/README.md#granite-97m-cpu-and-cuda-results)
 
 ### AMD GPUs
 
-Semfind supports AMD MIGraphX experimentally. Install ROCm for your GPU and Linux distribution. Follow AMD's guide to install its MIGraphX-enabled ONNX Runtime in a separate Python environment. Use `${XDG_DATA_HOME:-$HOME/.local/share}/semfind/runtime/migraphx` for automatic discovery by `init`. Install NumPy and Tokenizers in that environment. [AMD ONNX Runtime setup and compatibility](https://rocm.docs.amd.com/projects/ai-ecosystem/en/latest/inference/onnxruntime.html)
+Semfind supports AMD MIGraphX experimentally. Install ROCm for your GPU and Linux distribution. Follow AMD's guide to install its MIGraphX-enabled ONNX Runtime in a separate Python environment. Use `${XDG_DATA_HOME:-$HOME/.local/share}/semfind/runtime/migraphx` for automatic discovery. Install NumPy and Tokenizers in that environment. [AMD ONNX Runtime setup and compatibility](https://rocm.docs.amd.com/projects/ai-ecosystem/en/latest/inference/onnxruntime.html)
 
 ```bash
 amd_runtime="${XDG_DATA_HOME:-$HOME/.local/share}/semfind/runtime/migraphx"
@@ -156,10 +172,13 @@ Status, indexing, and search commands print a setup reminder on stderr until `in
 ```bash
 semfind init --exclude node_modules
 semfind "Screenshots bearbeiten" --category application
+semfind "Ein Programm zum Chatten"
 semfind status
 ```
 
 Run `semfind init` again to refresh the home directory, desktop applications, and local commands. Home exclusions follow the same rules as `semfind index`. If a saved root overlaps your home directory, use `semfind unindex` with that root before adopting the whole home directory. Reapply any exclusions you want to keep.
+
+Queries that explicitly ask for an application, such as `Ein Programm zum Chatten` or `An app for chatting`, search installed applications by the task described. Exact names and explicit filters take precedence.
 
 Run `semfind init --force` to rebuild the selected index from scratch. It rescans the home directory and all registered directories with their saved exclusions. It also rebuilds the desktop application, settings, and command catalogs. All registered directories must be accessible. Semfind writes the rebuilt index in one transaction and rolls back if the rebuild fails. The final report counts the replaced entries as removed and the newly indexed entries as written.
 

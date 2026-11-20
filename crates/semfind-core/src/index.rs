@@ -521,7 +521,7 @@ pub(crate) fn check_model(conn: &Connection, model: &impl Embedder) -> Result<()
     Ok(())
 }
 
-fn model_identity(conn: &Connection) -> Result<Option<String>> {
+pub(crate) fn model_identity(conn: &Connection) -> Result<Option<String>> {
     Ok(conn
         .query_row(
             "SELECT value FROM metadata WHERE key = 'model'",
