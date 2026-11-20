@@ -552,6 +552,7 @@ fn real_model_init_indexes_home_desktop_applications_and_manuals() -> Result<()>
     fs::remove_file(manual)?;
     let next_init = command().args(["init", "--no-caption-images"]).output()?;
     assert!(!String::from_utf8_lossy(&next_init.stderr).contains("Florence-2"));
+    assert!(!String::from_utf8_lossy(&next_init.stderr).contains("Total indexing time"));
     let report = String::from_utf8(success(next_init)?)?;
     assert!(
         report.contains(&format!(
@@ -574,7 +575,29 @@ fn real_model_init_indexes_home_desktop_applications_and_manuals() -> Result<()>
     )?;
     run(&["index", extra.to_str().unwrap(), "--exclude", "Private"])?;
     let before: serde_json::Value = serde_json::from_slice(&run(&["status", "--json"])?)?;
-    let rebuilt = String::from_utf8(run(&["init", "--force", "--no-caption-images"])?)?;
+    let timed = command()
+        .args(["init", "--force", "--time", "--no-caption-images"])
+        .output()?;
+    let stderr = String::from_utf8_lossy(&timed.stderr);
+    for label in [
+        "semfind: Total indexing time",
+        "  Preparing models",
+        "  Indexing catalogs",
+        "  Checking files",
+        "  Indexing applications",
+        "  Indexing local commands",
+        "  Saving the index",
+    ] {
+        let seconds: f64 = stderr
+            .lines()
+            .find_map(|line| line.strip_prefix(label)?.strip_suffix(" s"))
+            .with_context(|| format!("missing timing for {label} in {stderr}"))?
+            .trim()
+            .parse()?;
+        assert!(seconds.is_finite() && seconds >= 0.0);
+    }
+    let rebuilt = String::from_utf8(success(timed)?)?;
+    assert!(!rebuilt.contains("Total indexing time"));
     assert!(
         rebuilt.contains(&format!("Written: {} | Unchanged: 0", 6 + commands)),
         "{rebuilt}"

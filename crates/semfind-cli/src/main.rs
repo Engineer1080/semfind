@@ -89,6 +89,9 @@ enum Command {
         /// Rebuild the entire index, including all registered directories.
         #[arg(long)]
         force: bool,
+        /// Report indexing time and phase durations on stderr.
+        #[arg(long)]
+        time: bool,
         /// Exclude a directory or file by name or by a path relative to HOME.
         #[arg(long)]
         exclude: Vec<PathBuf>,
@@ -268,6 +271,7 @@ fn localized_help(messages: &Messages) -> clap::Command {
         .mut_subcommand("init", |sub| {
             sub.about(messages.init)
                 .mut_arg("force", |arg| arg.help(messages.force_init))
+                .mut_arg("time", |arg| arg.help(messages.init_time))
                 .mut_arg("exclude", |arg| arg.help(messages.exclude))
                 .mut_arg("clear_excludes", |arg| arg.help(messages.clear_excludes))
                 .mut_arg("no_caption_images", |arg| {
@@ -428,10 +432,12 @@ fn run(cli: Cli, output: &mut impl Write, messages: &'static Messages) -> Result
         }
         Some(Command::Init {
             force,
+            time,
             exclude,
             clear_excludes,
             no_caption_images,
         }) => {
+            let mut timing = (time || cli.search.time).then(progress::Timing::start);
             let home = env::var_os("HOME").context(messages.home_required)?;
             let directory = (!no_caption_images).then(caption_directory).transpose()?;
             let mut captioner = match directory.as_deref() {
@@ -462,12 +468,19 @@ fn run(cli: Cli, output: &mut impl Write, messages: &'static Messages) -> Result
                 &mut start_model()?,
                 captioner.as_mut().map(|model| model as &mut _),
                 |phase| {
+                    if let Some(timing) = &mut timing {
+                        timing.update(phase);
+                    }
                     if let Some(progress) = &progress {
                         progress.update(phase);
                     }
                 },
             )?;
+            let timing = timing.map(progress::Timing::finish);
             drop(progress);
+            if let Some(timing) = timing {
+                timing.print(messages);
+            }
             print_index_report(output, &report, messages)?;
         }
         Some(Command::Index {

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.6
+
+- Add `semfind init --time` to report total indexing time and the duration of each phase in seconds on stderr. It also works with `--force`. The final index summary remains on stdout.
+
 ## 0.2.5
 
 - Add `semfind init --force` to rebuild the home index, all registered directories, and the application, settings, and command catalogs. Saved exclusions apply to the rebuild.

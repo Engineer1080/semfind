@@ -24,6 +24,8 @@ pub(crate) struct Messages {
     pub time: &'static str,
     pub stdin: &'static str,
     pub search_time: &'static str,
+    pub init_time: &'static str,
+    pub init_elapsed: &'static str,
     pub hint: [&'static str; 2],
     pub status_labels: [&'static str; 6],
     pub report_labels: [&'static str; 4],
@@ -88,6 +90,8 @@ const EN: Messages = Messages {
     time: "Report elapsed search time on stderr.",
     stdin: "Read one query per line from stdin and write one JSON result array per query.",
     search_time: "Search time",
+    init_time: "Report indexing time and phase durations on stderr.",
+    init_elapsed: "Total indexing time",
     hint: [
         "Find documents by what you remember, apps by what they do, and Linux commands by describing the task.",
         "Run `semfind init` once to set up local search.",
@@ -152,6 +156,8 @@ const DE: Messages = Messages {
     time: "Suchzeit auf stderr ausgeben.",
     stdin: "Suchanfragen zeilenweise von stdin lesen und je Anfrage ein JSON-Array ausgeben.",
     search_time: "Suchzeit",
+    init_time: "Gesamtdauer und Dauer der Indexierungsphasen auf stderr ausgeben.",
+    init_elapsed: "Gesamtdauer der Indexierung",
     hint: [
         "Finde Dokumente nach ihrem Inhalt, Programme nach ihrer Funktion und Linux-Befehle, indem du die Aufgabe beschreibst.",
         "Führe einmal `semfind init` aus, um die lokale Suche einzurichten.",
@@ -216,6 +222,8 @@ const RU: Messages = Messages {
     time: "Вывести время поиска в stderr.",
     stdin: "Читать запросы из stdin построчно и выводить по одному массиву JSON на запрос.",
     search_time: "Время поиска",
+    init_time: "Вывести в stderr общее время индексации и длительность каждого этапа.",
+    init_elapsed: "Общее время индексации",
     hint: [
         "Находите документы по содержимому, приложения по назначению, а команды Linux по описанию задачи.",
         "Один раз выполните `semfind init`, чтобы настроить локальный поиск.",
@@ -280,6 +288,8 @@ const PT: Messages = Messages {
     time: "Mostrar o tempo de busca em stderr.",
     stdin: "Ler uma consulta por linha de stdin e retornar um array JSON por consulta.",
     search_time: "Tempo de busca",
+    init_time: "Mostrar no stderr o tempo total de indexação e a duração de cada fase.",
+    init_elapsed: "Tempo total de indexação",
     hint: [
         "Encontre documentos pelo conteúdo, aplicativos pelo que fazem e comandos Linux descrevendo a tarefa.",
         "Execute `semfind init` uma vez para configurar a busca local.",
@@ -344,6 +354,8 @@ const FR: Messages = Messages {
     time: "Afficher la durée de la recherche sur stderr.",
     stdin: "Lire une requête par ligne sur stdin et écrire un tableau JSON par requête.",
     search_time: "Durée de la recherche",
+    init_time: "Afficher sur stderr la durée totale de l’indexation et de chaque phase.",
+    init_elapsed: "Durée totale de l’indexation",
     hint: [
         "Retrouvez des documents par leur contenu, des applications par leur fonction et des commandes Linux en décrivant la tâche.",
         "Exécutez `semfind init` une fois pour configurer la recherche locale.",
@@ -408,6 +420,8 @@ const ES: Messages = Messages {
     time: "Mostrar el tiempo de búsqueda en stderr.",
     stdin: "Leer una consulta por línea de stdin y escribir un arreglo JSON por consulta.",
     search_time: "Tiempo de búsqueda",
+    init_time: "Mostrar en stderr el tiempo total de indexación y la duración de cada fase.",
+    init_elapsed: "Tiempo total de indexación",
     hint: [
         "Encuentra documentos por su contenido, aplicaciones por lo que hacen y comandos de Linux describiendo la tarea.",
         "Ejecuta `semfind init` una vez para configurar la búsqueda local.",
@@ -472,6 +486,8 @@ const IT: Messages = Messages {
     time: "Mostra il tempo di ricerca su stderr.",
     stdin: "Legge una query per riga da stdin e scrive un array JSON per ogni query.",
     search_time: "Tempo di ricerca",
+    init_time: "Mostrare su stderr il tempo totale di indicizzazione e la durata di ogni fase.",
+    init_elapsed: "Tempo totale di indicizzazione",
     hint: [
         "Trova documenti in base al contenuto, applicazioni in base alla funzione e comandi Linux descrivendo l’operazione.",
         "Esegui `semfind init` una volta per configurare la ricerca locale.",

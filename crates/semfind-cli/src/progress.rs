@@ -8,6 +8,60 @@ use std::{
     time::{Duration, Instant},
 };
 
+fn phase_index(phase: InitProgress) -> usize {
+    match phase {
+        InitProgress::Catalogs => 1,
+        InitProgress::Files(_) => 2,
+        InitProgress::Applications => 3,
+        InitProgress::LocalCommands => 4,
+        InitProgress::Saving => 5,
+        _ => 0,
+    }
+}
+
+pub(crate) struct Timing {
+    current: usize,
+    started: Instant,
+    elapsed: [Duration; 6],
+}
+
+impl Timing {
+    pub fn start() -> Self {
+        Self {
+            current: phase_index(InitProgress::Preparing),
+            started: Instant::now(),
+            elapsed: [Duration::ZERO; 6],
+        }
+    }
+
+    pub fn update(&mut self, phase: InitProgress) {
+        let next = phase_index(phase);
+        if next != self.current {
+            let now = Instant::now();
+            self.elapsed[self.current] += now - self.started;
+            self.current = next;
+            self.started = now;
+        }
+    }
+
+    pub fn finish(mut self) -> Self {
+        self.elapsed[self.current] += self.started.elapsed();
+        self
+    }
+
+    pub fn print(self, messages: &Messages) {
+        let total: Duration = self.elapsed.iter().sum();
+        eprintln!(
+            "semfind: {} {:.2} s",
+            messages.init_elapsed,
+            total.as_secs_f64()
+        );
+        for (label, duration) in messages.init_progress.into_iter().zip(self.elapsed) {
+            eprintln!("  {label} {:.2} s", duration.as_secs_f64());
+        }
+    }
+}
+
 pub(crate) struct Progress {
     phase: Arc<Mutex<InitProgress>>,
     stop: mpsc::Sender<()>,
@@ -26,18 +80,12 @@ impl Progress {
         let thread = thread::spawn(move || {
             for frame in ['|', '/', '-', '\\'].into_iter().cycle() {
                 let phase = *state.lock().expect("progress state poisoned");
-                let [preparing, catalogs, files, applications, commands, saving] =
-                    messages.init_progress;
-                let (label, count) = match phase {
-                    InitProgress::Catalogs => (catalogs, None),
-                    InitProgress::Files(count) => (files, Some(count)),
-                    InitProgress::Applications => (applications, None),
-                    InitProgress::LocalCommands => (commands, None),
-                    InitProgress::Saving => (saving, None),
-                    _ => (preparing, None),
+                let label = messages.init_progress[phase_index(phase)];
+                let count = match phase {
+                    InitProgress::Files(count) => format!("  {count}"),
+                    _ => String::new(),
                 };
                 let seconds = started.elapsed().as_secs();
-                let count = count.map(|count| format!("  {count}")).unwrap_or_default();
                 {
                     let mut stderr = io::stderr().lock();
                     let _ = write!(
