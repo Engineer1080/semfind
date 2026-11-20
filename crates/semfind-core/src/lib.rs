@@ -14,5 +14,5 @@ pub use commands::Distro;
 pub use files::FileKind;
 pub use index::{Index, IndexOptions, IndexReport, Status};
 pub use locale::Language;
-pub use model::{Embedder, InputKind, LocalModel};
+pub use model::{Embedder, ExecutionDevice, InputKind, LocalModel};
 pub use search::{Category, Hit, SearchOptions};

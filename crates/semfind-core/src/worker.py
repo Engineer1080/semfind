@@ -1,4 +1,5 @@
 """Local embedding inference over the parent process pipes."""
+from contextlib import redirect_stdout
 import hashlib
 import json
 from pathlib import Path
@@ -7,6 +8,14 @@ import sys
 import numpy as np
 import onnxruntime as ort
 from tokenizers import Tokenizer
+
+CUDA_PROVIDER = "CUDAExecutionProvider"
+MIGRAPHX_PROVIDER = "MIGraphXExecutionProvider"
+CPU_PROVIDER = "CPUExecutionProvider"
+GPU_BACKENDS = {
+    "cuda": (CUDA_PROVIDER, "CUDA", "ONNX Runtime GPU and the NVIDIA driver"),
+    "migraphx": (MIGRAPHX_PROVIDER, "MIGraphX", "AMD's ONNX Runtime build and ROCm"),
+}
 
 GRANITE_97_TOKENIZER = "4f2842d568e2724370aec203652a42ac783c7937f8347a1a2cc7506d71f1582f"
 GRANITE_311_TOKENIZER = "0087c868b33bad550a78a08d19798cfd7f713cde4f020803b8f51f405503e15f"
@@ -43,6 +52,41 @@ def custom_recipe(path):
     return recipe, cutoff
 
 
+def create_session(model, options, device):
+    if device == "cpu":
+        return ort.InferenceSession(str(model), options, providers=[CPU_PROVIDER])
+    available = ort.get_available_providers()
+    for backend, (provider, label, requirements) in GPU_BACKENDS.items():
+        if device not in ("auto", backend):
+            continue
+        if provider not in available:
+            if device == backend:
+                raise SystemExit(f"{label} requested but unavailable. Check {requirements}.")
+            continue
+        try:
+            # ONNX Runtime can print library diagnostics to stdout.
+            with redirect_stdout(sys.stderr):
+                gpu_provider = provider
+                if provider == CUDA_PROVIDER:
+                    ort.preload_dlls()
+                    gpu_provider = (provider, {"use_tf32": "0"})
+                session = ort.InferenceSession(
+                    str(model), options,
+                    providers=[gpu_provider, CPU_PROVIDER],
+                    enable_fallback=False,
+                )
+            if session.get_providers()[0] != provider:
+                raise RuntimeError(f"ONNX Runtime did not activate {provider}")
+            # Older AMD builds can ignore the constructor's fallback option.
+            session.disable_fallback()
+            return session
+        except Exception as error:
+            if device == backend:
+                raise RuntimeError(f"{label} could not initialize. Check {requirements}.") from error
+            print(f"semfind: {label} could not initialize. Trying the next available device.", file=sys.stderr)
+    return ort.InferenceSession(str(model), options, providers=[CPU_PROVIDER])
+
+
 def main():
     sys.stdin.reconfigure(encoding="utf-8")
     ort.disable_telemetry_events()
@@ -76,7 +120,12 @@ def main():
     options.intra_op_num_threads = 2
     options.inter_op_num_threads = 1
     options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-    session = ort.InferenceSession(str(model), options, providers=["CPUExecutionProvider"])
+    device = sys.argv[2]
+    if device == "auto":
+        # Keep ordinary graph placement warnings out of CLI output.
+        options.log_severity_level = 3
+    session = create_session(model, options, device)
+    provider = session.get_providers()[0]
     tokenizer = Tokenizer.from_file(str(tokenizer_file))
     tokenizer.enable_truncation(max_length=encoding["max_tokens"])
     if recipe == "e5-mean-pool-v1":
@@ -101,7 +150,17 @@ def main():
             "attention_mask": np.asarray([row.attention_mask for row in batch], dtype=np.int64),
             "token_type_ids": np.asarray([row.type_ids for row in batch], dtype=np.int64),
         }
-        hidden, = session.run([output], {key: columns[key] for key in inputs})
+        feeds = {key: columns[key] for key in inputs}
+        try:
+            hidden, = session.run([output], feeds)
+        except Exception:
+            if device != "auto" or provider == CPU_PROVIDER:
+                raise
+            print(f"semfind: {provider} inference failed. Using the CPU.", file=sys.stderr)
+            del session
+            session = create_session(model, options, "cpu")
+            provider = CPU_PROVIDER
+            hidden, = session.run([output], feeds)
         if pooling != "sentence" and hidden.ndim != 3:
             raise ValueError("cls and mean pooling require an ONNX output shaped [batch, tokens, dimensions]")
         if pooling == "sentence":

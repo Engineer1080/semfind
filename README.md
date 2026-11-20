@@ -1,6 +1,6 @@
 # semfind
 
-An experimental, offline search engine for Linux. Use everyday language to find files in selected folders, desktop applications, COSMIC settings, and Linux commands.
+An experimental, offline search engine for the Linux terminal. Use everyday language to find files in selected folders, desktop applications, COSMIC settings, and Linux commands.
 
 Linux filename search helps when you know what a file is called. Full-text search helps when you remember its wording. semfind also compares the meaning of a query with document passages. A German question can retrieve an English document, and an exact filename, settings ID, or error code still takes priority.
 
@@ -33,6 +33,8 @@ export SEMFIND_PYTHON="$VIRTUAL_ENV/bin/python"
 ```
 
 Dependencies and the model are downloaded during setup. The default Granite FP32 model and tokenizer take about 415 MB on disk. The downloader verifies SHA-256 checksums against a fixed model revision. Subsequent indexing and search read the model from disk. Use `python scripts/download_model.py --model e5-small` to download E5 Small, optionally with `--variant int8` for compatible CPUs. Use a separate model and index directory when changing variants.
+
+`cargo install` installs the `semfind` command in `$HOME/.cargo/bin` by default. For later terminal sessions, keep that directory on `PATH` and set `SEMFIND_PYTHON` to the absolute path of the virtual environment's Python interpreter.
 
 ### Upgrade an existing E5 installation
 
@@ -79,10 +81,37 @@ Set `--model-dir` or `SEMFIND_MODEL_DIR` to a local directory. Use this setting 
 
 Use a separate index for your model. Changes to the weights, tokenizer, or encoding settings require reindexing. You can adjust the similarity cutoff without reindexing.
 
+### Run inference on an NVIDIA GPU
+
+Starting with 0.1.8, Semfind tries NVIDIA CUDA automatically when the selected Python environment has ONNX Runtime GPU. The standard Python requirements provide the CPU runtime. To enable automatic GPU use, select a Python environment with ONNX Runtime GPU and check that `nvidia-smi` can see the GPU. The PyPI build below requires a driver that supports CUDA 13 and installs the CUDA and cuDNN runtime libraries through pip. [ONNX Runtime CUDA requirements](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html#requirements)
+
+```bash
+python3 -m venv .venv-cuda
+.venv-cuda/bin/python -m pip install 'onnxruntime-gpu[cuda,cudnn]==1.32.0' 'numpy==2.5.5' 'tokenizers==0.23.3'
+export SEMFIND_PYTHON="$PWD/.venv-cuda/bin/python"
+semfind 'How do I find files modified today?'
+```
+
+The default is `--device auto`. Semfind tries CUDA, then MIGraphX, then the CPU, depending on which providers the selected Python environment offers. Use `--device cpu` to force CPU inference or `--device cuda` to require CUDA. You can also set `SEMFIND_DEVICE`. The same model and weights can reuse an index on another backend. Tokenization, filesystem scanning, SQLite, and search ranking still run on the CPU. On the tested RTX 4080 SUPER, CUDA sped up index building and searches with a running model worker. Individual semantic searches in the CLI took longer because each starts a new CUDA session. [CPU and CUDA benchmark](benchmarks/retrieval/README.md#granite-97m-cpu-and-cuda-results)
+
+### AMD GPUs
+
+Semfind 0.1.8 introduces experimental MIGraphX support. Install ROCm for your GPU and Linux distribution. Follow AMD's guide to install its MIGraphX-enabled ONNX Runtime in a separate Python environment such as `.venv-amd`. Install NumPy and Tokenizers in that environment. The standard `requirements.txt` installs the CPU build of ONNX Runtime, so use AMD's package for this environment. [AMD ONNX Runtime setup and compatibility](https://rocm.docs.amd.com/projects/ai-ecosystem/en/latest/inference/onnxruntime.html)
+
+```bash
+.venv-amd/bin/python -m pip install 'numpy==2.5.5' 'tokenizers==0.23.3'
+export SEMFIND_PYTHON="$PWD/.venv-amd/bin/python"
+"$SEMFIND_PYTHON" -c 'import onnxruntime as ort; print(ort.get_available_providers())'
+semfind --device migraphx index
+semfind --device migraphx 'How do I find files modified today?'
+```
+
+The provider list should include `MIGraphXExecutionProvider`. The explicit `--device migraphx` setting reports an error if the provider cannot start or inference fails. ONNX Runtime can still place individual graph operations on the CPU. With the default `--device auto`, Semfind falls back to the CPU if GPU inference fails. Granite 97M execution and performance on AMD hardware still need verification. [ONNX Runtime MIGraphX provider](https://onnxruntime.ai/docs/execution-providers/MIGraphX-ExecutionProvider.html)
+
 ## Try it
 
 On Linux, run `semfind init` after setup to index your home directory, desktop applications, and local command manuals. The first scan can take time on a large home directory or a system with many manuals.
-Until `init` succeeds for the selected index, other commands print a setup reminder on stderr.
+Status, indexing, and search commands print a setup reminder on stderr until `init` succeeds for the selected index.
 
 ```bash
 semfind init --exclude node_modules
@@ -160,7 +189,7 @@ Local data defaults to `${XDG_DATA_HOME:-$HOME/.local/share}/semfind`. Set `SEMF
 
 ## Architecture and limits
 
-The Rust CLI calls the same library that future clients will use. The core stages reads, extracts text, and stores passages and vectors in a single SQLite transaction. A local CPU worker runs the embedding model through ONNX Runtime. Query-time cosine similarity and FTS5's BM25 rankings are fused with Reciprocal Rank Fusion. See [architecture](docs/architecture.md) and [privacy](docs/privacy.md).
+The Rust CLI calls the same library that future clients will use. The core stages reads, extracts text, and stores passages and vectors in a single SQLite transaction. A local worker runs the embedding model through ONNX Runtime on the CPU or with NVIDIA CUDA or AMD MIGraphX. Query-time cosine similarity and FTS5's BM25 rankings are fused with Reciprocal Rank Fusion. See [architecture](docs/architecture.md) and [privacy](docs/privacy.md).
 
 The MVP is intended for small collections. Exact cosine search scales linearly with the number of passages. Semantic hits use a model-specific cosine similarity cutoff. Literal and full-text matching still apply at any similarity. Scanned PDFs require a text layer. Settings results carry catalog metadata. A desktop UI, launching apps from results, a background service, and file history are roadmap items. See [roadmap](docs/roadmap.md) and [COSMIC research](integrations/cosmic/README.md).
 

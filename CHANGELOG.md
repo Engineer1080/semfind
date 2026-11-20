@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.8
+
+- Select the inference device automatically based on the configured ONNX Runtime. Try NVIDIA CUDA, AMD MIGraphX, and then the CPU. In automatic mode, retry failed GPU inference on the CPU.
+- Choose a backend explicitly with `--device cpu`, `--device cuda`, or `--device migraphx`. You can also set `SEMFIND_DEVICE`. The same model can reuse an existing index across backends.
+- Add NVIDIA and AMD setup instructions and a reproducible Granite 97M CPU and CUDA benchmark. MIGraphX support is experimental. Provider selection and CPU fallback were tested with a simulated AMD provider. Granite 97M inference and performance on AMD hardware still need verification.
+
 ## 0.1.7
 
 - Select Granite 97M, Granite 311M, E5 Small, or E5 Large through `--model` or `SEMFIND_MODEL`. The downloader accepts the same choices.

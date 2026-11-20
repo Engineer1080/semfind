@@ -26,7 +26,21 @@ pub trait Embedder {
     fn encode(&mut self, kind: InputKind, texts: &[String]) -> Result<Vec<Vec<f32>>>;
 }
 
-/// CPU-only ONNX encoder through a local Python worker.
+/// Execution backend for the local ONNX worker.
+#[derive(Clone, Copy, Debug, Default)]
+pub enum ExecutionDevice {
+    /// Prefer CUDA, then MIGraphX, then the CPU.
+    #[default]
+    Auto,
+    /// Run inference on the CPU.
+    Cpu,
+    /// Run inference with the NVIDIA CUDA execution provider.
+    Cuda,
+    /// Run inference with the AMD MIGraphX execution provider.
+    Migraphx,
+}
+
+/// ONNX encoder through a local Python worker.
 pub struct LocalModel {
     child: Child,
     input: BufWriter<ChildStdin>,
@@ -44,9 +58,21 @@ struct WorkerReady {
 impl LocalModel {
     /// Start a worker with a local directory containing model.onnx and tokenizer.json.
     pub fn start(python: &Path, directory: &Path) -> Result<Self> {
+        Self::start_on(python, directory, ExecutionDevice::Auto)
+    }
+
+    /// Start a worker on the requested execution backend.
+    pub fn start_on(python: &Path, directory: &Path, device: ExecutionDevice) -> Result<Self> {
+        let device = match device {
+            ExecutionDevice::Auto => "auto",
+            ExecutionDevice::Cpu => "cpu",
+            ExecutionDevice::Cuda => "cuda",
+            ExecutionDevice::Migraphx => "migraphx",
+        };
         let mut child = Command::new(python)
             .args(["-I", "-u", "-c", include_str!("worker.py")])
             .arg(directory)
+            .arg(device)
             .env("RAYON_NUM_THREADS", "1")
             .env("OPENBLAS_NUM_THREADS", "1")
             .env("OMP_NUM_THREADS", "1")

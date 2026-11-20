@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, ensure};
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use semfind_core::{
-    Category, Distro, FileKind, Index, IndexOptions, IndexReport, Language, LocalModel,
-    SearchOptions,
+    Category, Distro, ExecutionDevice, FileKind, Index, IndexOptions, IndexReport, Language,
+    LocalModel, SearchOptions,
 };
 mod distro;
 mod ui;
@@ -35,12 +35,29 @@ struct Cli {
     /// Select an embedding model installed by scripts/download_model.py.
     #[arg(long, env = "SEMFIND_MODEL", value_enum, global = true)]
     model: Option<ModelChoice>,
+    /// Inference backend. Auto tries CUDA, MIGraphX, then CPU.
+    #[arg(
+        long,
+        env = "SEMFIND_DEVICE",
+        value_enum,
+        default_value = "auto",
+        global = true
+    )]
+    device: DeviceChoice,
     #[arg(long, env = "SEMFIND_PYTHON", default_value = "python3", global = true)]
     python: PathBuf,
     #[command(subcommand)]
     command: Option<Command>,
     #[command(flatten)]
     search: Search,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum DeviceChoice {
+    Auto,
+    Cpu,
+    Cuda,
+    Migraphx,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -324,7 +341,13 @@ fn run(cli: Cli, output: &mut impl Write, messages: &Messages) -> Result<()> {
                 .join("model")
                 .join(selected_model.directory()),
         };
-        LocalModel::start(&cli.python, &directory)
+        let device = match cli.device {
+            DeviceChoice::Auto => ExecutionDevice::Auto,
+            DeviceChoice::Cpu => ExecutionDevice::Cpu,
+            DeviceChoice::Cuda => ExecutionDevice::Cuda,
+            DeviceChoice::Migraphx => ExecutionDevice::Migraphx,
+        };
+        LocalModel::start_on(&cli.python, &directory, device)
     };
     match cli.command {
         Some(Command::Status { json }) => {

@@ -13,6 +13,26 @@ Use the Python dependencies from the project setup and put Cargo on `PATH`. From
 
 The runner verifies model files against pinned SHA-256 checksums. The E5 Large download is about 2.26 GB including external weights. Granite 311M requires about 1.28 GB. With no download flags, the runner uses the local model files. It builds the Rust example in release mode and writes `target/retrieval-benchmark-granite-311/summary.md` and `target/retrieval-benchmark-granite-311/results.json`. The JSON includes the raw timings, cutoff sweep, expected results, returned ranks, model identities, and environment details. Each index is built in a temporary directory from the synthetic fixture. See `run.py --help` for alternative paths.
 
+Use `--granite-cuda` to compare the same Granite 97M FP32 weights and the production similarity cutoff on both backends. Run the benchmark with the [GPU Python environment](../../README.md#run-inference-on-an-nvidia-gpu) on a host where `nvidia-smi` can see the NVIDIA GPU.
+
+```bash
+.venv-cuda/bin/python benchmarks/retrieval/run.py --granite-cuda --download-granite
+```
+
+This run writes to `target/retrieval-benchmark-granite-cuda/`. CUDA uses FP32 with TF32 disabled. Query times include tokenization, transfer, inference, and search ranking.
+
+## Granite 97M CPU and CUDA results
+
+Semfind 0.1.7 ran with ONNX Runtime 1.32.0 on a Ryzen 7 5800X3D and a GeForce RTX 4080 SUPER with NVIDIA driver 595.104.02. The run indexed 75 sources and 255 passages. The two backends returned identical ordered result lists on all 44 English test queries.
+
+| Metric | CPU | CUDA |
+| --- | ---: | ---: |
+| Fresh index after model load, median | 2.755 s | 0.438 s |
+| Warm search, median / p95 | 7.01 / 8.45 ms | 3.75 / 4.57 ms |
+| Cold search, median | 1.735 s | 2.013 s |
+
+CUDA took about one sixth of the CPU time for indexing and about half the time for a search with the model already loaded. The cold search includes starting a new worker and initializing the backend. The CLI starts a new worker for each invocation that needs embeddings.
+
 ## Method
 
 - The fixture contains synthetic documents and English queries with expected result IDs. The test includes same-language documents, English questions about German, French and Spanish documents, exact filenames and error codes, built-in Linux commands and COSMIC settings, and queries with no relevant result. All models index the same files and built-in catalogs. The benchmark uses Debian-family command examples and omits host-specific application and manpage catalogs.

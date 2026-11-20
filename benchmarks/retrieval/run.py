@@ -114,7 +114,8 @@ def summary(result):
     lines = [
         "# semfind retrieval benchmark",
         "",
-        f"semfind {result['semfind_version']} on {result['environment']['cpu']} with CPU-only ONNX Runtime.",
+        f"semfind {result['semfind_version']} on {result['environment']['cpu']} with ONNX Runtime.",
+        *([f"CUDA device: {result['environment']['gpu']}."] if "gpu" in result["environment"] else []),
         f"{result['document_count']} synthetic documents and the built-in settings and command catalogs.",
         f"{len(queries)} English test queries, including {positives} with a known match and {len(queries) - positives} without one.",
         f"{len(result['validation_queries'])} separate validation queries for choosing cutoffs.",
@@ -191,9 +192,9 @@ def environment(python):
     dependency_versions = subprocess.check_output(
         [
             python, "-I", "-c",
-            'import importlib.metadata as m, json, platform; '
-            'print(json.dumps({"python": platform.python_version(), **'
-            '{p: m.version(p) for p in ("onnxruntime", "tokenizers", "numpy")}}))',
+            'import importlib.metadata as m, json, onnxruntime as ort, platform; '
+            'print(json.dumps({"python": platform.python_version(), "onnxruntime": ort.__version__, '
+            '**{p: m.version(p) for p in ("tokenizers", "numpy")}}))',
         ],
         text=True,
     )
@@ -216,26 +217,37 @@ def main():
     parser.add_argument("--download-granite", action="store_true")
     parser.add_argument("--download-e5-large", action="store_true")
     parser.add_argument("--download-granite-311", action="store_true")
-    parser.add_argument("--output", type=Path, default=ROOT / "target/retrieval-benchmark-granite-311")
+    parser.add_argument("--granite-cuda", action="store_true", help="Compare Granite 97M on CPU and CUDA")
+    parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     python = args.python.absolute()
     metadata = environment(python)
-    for name, digest in E5_SHA256.items():
-        require_artifact(args.e5 / name, digest)
     for name, (upstream, digest) in GRANITE_FILES.items():
         url = f"{GRANITE_URL}/{upstream}" if args.download_granite else None
         require_artifact(args.granite / name, digest, url)
-    for name, digest in E5_LARGE_SHA256.items():
-        url = f"{E5_LARGE_URL}/{name}" if args.download_e5_large else None
-        require_artifact(args.e5_large / name, digest, url)
-    for name, (upstream, digest) in GRANITE_311_FILES.items():
-        url = f"{GRANITE_311_URL}/{upstream}" if args.download_granite_311 else None
-        require_artifact(args.granite_311 / name, digest, url)
+    if args.granite_cuda:
+        metadata["gpu"] = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"],
+            text=True,
+        ).strip().replace("\n", " / ")
+        model_args = [args.granite.absolute()]
+        output_name = "retrieval-benchmark-granite-cuda"
+    else:
+        for name, digest in E5_SHA256.items():
+            require_artifact(args.e5 / name, digest)
+        for name, digest in E5_LARGE_SHA256.items():
+            url = f"{E5_LARGE_URL}/{name}" if args.download_e5_large else None
+            require_artifact(args.e5_large / name, digest, url)
+        for name, (upstream, digest) in GRANITE_311_FILES.items():
+            url = f"{GRANITE_311_URL}/{upstream}" if args.download_granite_311 else None
+            require_artifact(args.granite_311 / name, digest, url)
+        model_args = [args.e5.absolute(), args.granite.absolute(), args.e5_large.absolute(), args.granite_311.absolute()]
+        output_name = "retrieval-benchmark-granite-311"
+    output = args.output or ROOT / "target" / output_name
     process = subprocess.run(
         [
             "cargo", "run", "--release", "--locked", "-p", "semfind-core", "--example",
-            "retrieval_benchmark", "--", BENCHMARK / "corpus.json", args.e5.absolute(),
-            args.granite.absolute(), args.e5_large.absolute(), args.granite_311.absolute(), python,
+            "retrieval_benchmark", "--", BENCHMARK / "corpus.json", *model_args, python,
         ],
         cwd=ROOT,
         check=True,
@@ -243,12 +255,12 @@ def main():
     )
     result = json.loads(process.stdout)
     result["environment"] = metadata
-    args.output.mkdir(parents=True, exist_ok=True)
-    (args.output / "results.json").write_text(
+    output.mkdir(parents=True, exist_ok=True)
+    (output / "results.json").write_text(
         json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
     report = summary(result)
-    (args.output / "summary.md").write_text(report, encoding="utf-8")
+    (output / "summary.md").write_text(report, encoding="utf-8")
     print(report, end="")
 
 

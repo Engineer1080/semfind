@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, ensure};
 use semfind_core::{
-    Category, Distro, Embedder, Hit, Index, IndexOptions, InputKind, LocalModel, SearchOptions,
+    Category, Distro, Embedder, ExecutionDevice, Hit, Index, IndexOptions, InputKind, LocalModel,
+    SearchOptions,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -13,7 +14,6 @@ use std::{
 const INDEX_ROUNDS: usize = 3;
 const WARM_ROUNDS: usize = 5;
 const RESULT_LIMIT: usize = 10;
-const MODEL_COUNT: usize = 4;
 
 #[derive(Deserialize)]
 struct Dataset {
@@ -75,11 +75,12 @@ struct ModelSpec<'a> {
     weights: &'a Path,
     dimensions: usize,
     external_weights: bool,
+    device: ExecutionDevice,
 }
 
 impl ModelSpec<'_> {
     fn start(&self) -> Result<BenchmarkModel> {
-        let worker = LocalModel::start(self.python, self.weights)
+        let worker = LocalModel::start_on(self.python, self.weights, self.device)
             .with_context(|| format!("start {}", self.name))?;
         Ok(BenchmarkModel {
             worker,
@@ -208,8 +209,8 @@ fn ms(started: Instant) -> f64 {
     started.elapsed().as_secs_f64() * 1000.0
 }
 
-fn order(round: usize) -> impl Iterator<Item = usize> {
-    (0..MODEL_COUNT).map(move |index| (index + round) % MODEL_COUNT)
+fn order(round: usize, count: usize) -> impl Iterator<Item = usize> {
+    (0..count).map(move |index| (index + round) % count)
 }
 
 fn prepare_corpus(dataset: &Dataset, root: &Path) -> Result<()> {
@@ -230,10 +231,68 @@ fn prepare_corpus(dataset: &Dataset, root: &Path) -> Result<()> {
 
 fn main() -> Result<()> {
     let args: Vec<PathBuf> = env::args_os().skip(1).map(PathBuf::from).collect();
-    let [dataset_path, e5, granite, e5_large, granite_311, python] = args.as_slice() else {
-        anyhow::bail!(
-            "expected DATASET E5_SMALL_DIR GRANITE_97_DIR E5_LARGE_DIR GRANITE_311_DIR PYTHON"
-        );
+    let (dataset_path, specs) = match args.as_slice() {
+        [dataset_path, granite, python] => (
+            dataset_path,
+            vec![
+                ModelSpec {
+                    name: "Granite 97M CPU",
+                    python,
+                    weights: granite,
+                    dimensions: 384,
+                    external_weights: false,
+                    device: ExecutionDevice::Cpu,
+                },
+                ModelSpec {
+                    name: "Granite 97M CUDA",
+                    python,
+                    weights: granite,
+                    dimensions: 384,
+                    external_weights: false,
+                    device: ExecutionDevice::Cuda,
+                },
+            ],
+        ),
+        [dataset_path, e5, granite, e5_large, granite_311, python] => (
+            dataset_path,
+            vec![
+                ModelSpec {
+                    name: "E5 Small",
+                    python,
+                    weights: e5,
+                    dimensions: 384,
+                    external_weights: false,
+                    device: ExecutionDevice::Cpu,
+                },
+                ModelSpec {
+                    name: "Granite 97M",
+                    python,
+                    weights: granite,
+                    dimensions: 384,
+                    external_weights: false,
+                    device: ExecutionDevice::Cpu,
+                },
+                ModelSpec {
+                    name: "E5 Large",
+                    python,
+                    weights: e5_large,
+                    dimensions: 1024,
+                    external_weights: true,
+                    device: ExecutionDevice::Cpu,
+                },
+                ModelSpec {
+                    name: "Granite 311M",
+                    python,
+                    weights: granite_311,
+                    dimensions: 768,
+                    external_weights: false,
+                    device: ExecutionDevice::Cpu,
+                },
+            ],
+        ),
+        _ => anyhow::bail!(
+            "expected DATASET GRANITE_97_DIR PYTHON or DATASET E5_SMALL_DIR GRANITE_97_DIR E5_LARGE_DIR GRANITE_311_DIR PYTHON"
+        ),
     };
     let dataset: Dataset = serde_json::from_slice(&fs::read(dataset_path)?)?;
     let validation: Vec<_> = dataset
@@ -257,41 +316,12 @@ fn main() -> Result<()> {
         .tempdir()?;
     let corpus = scratch.path().join("corpus");
     prepare_corpus(&dataset, &corpus)?;
-    let specs: [ModelSpec<'_>; MODEL_COUNT] = [
-        ModelSpec {
-            name: "E5 Small",
-            python,
-            weights: e5,
-            dimensions: 384,
-            external_weights: false,
-        },
-        ModelSpec {
-            name: "Granite 97M",
-            python,
-            weights: granite,
-            dimensions: 384,
-            external_weights: false,
-        },
-        ModelSpec {
-            name: "E5 Large",
-            python,
-            weights: e5_large,
-            dimensions: 1024,
-            external_weights: true,
-        },
-        ModelSpec {
-            name: "Granite 311M",
-            python,
-            weights: granite_311,
-            dimensions: 768,
-            external_weights: false,
-        },
-    ];
-    let mut measurements: [Measurements; MODEL_COUNT] = Default::default();
-    let mut index_paths: [PathBuf; MODEL_COUNT] = Default::default();
+    let count = specs.len();
+    let mut measurements: Vec<_> = (0..count).map(|_| Measurements::default()).collect();
+    let mut index_paths = vec![PathBuf::new(); count];
     let exclusions = IndexOptions::default();
     for round in 0..INDEX_ROUNDS {
-        for i in order(round) {
+        for i in order(round, count) {
             let mut model = specs[i].start()?;
             let path = scratch.path().join(format!("index-{i}-{round}"));
             let started = Instant::now();
@@ -317,7 +347,7 @@ fn main() -> Result<()> {
     for (i, spec) in specs.iter().enumerate() {
         let index = Index::open(&index_paths[i])?;
         let mut model = spec.start()?;
-        let production_cutoff = (i == 0)
+        let production_cutoff = (count == 2 || i == 0)
             .then(|| model.worker.minimum_similarity())
             .flatten();
         let (tuned_cutoff, calibration) = calibrate(&index, &mut model, &corpus, &validation)?;
@@ -364,7 +394,7 @@ fn main() -> Result<()> {
     }
     for round in 0..WARM_ROUNDS {
         for query in &test {
-            for i in order(round) {
+            for i in order(round, count) {
                 let (index, model) = &mut live[i];
                 let started = Instant::now();
                 index.search(&query.query, &options(query), model)?;
@@ -381,7 +411,7 @@ fn main() -> Result<()> {
         .filter(|query| !query.relevant.is_empty() && groups.insert(&query.group))
         .collect();
     for (round, query) in cold_queries.iter().enumerate() {
-        for i in order(round) {
+        for i in order(round, count) {
             let cold = Instant::now();
             let index = Index::open(&index_paths[i])?;
             let startup = Instant::now();
