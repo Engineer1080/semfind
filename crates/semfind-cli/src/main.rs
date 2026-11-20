@@ -86,6 +86,9 @@ impl ModelChoice {
 enum Command {
     /// Index the home directory, desktop applications, local commands and built-in catalogs.
     Init {
+        /// Rebuild the entire index, including all registered directories.
+        #[arg(long)]
+        force: bool,
         /// Exclude a directory or file by name or by a path relative to HOME.
         #[arg(long)]
         exclude: Vec<PathBuf>,
@@ -264,6 +267,7 @@ fn localized_help(messages: &Messages) -> clap::Command {
     apply_search_help(Cli::command().about(messages.about), messages)
         .mut_subcommand("init", |sub| {
             sub.about(messages.init)
+                .mut_arg("force", |arg| arg.help(messages.force_init))
                 .mut_arg("exclude", |arg| arg.help(messages.exclude))
                 .mut_arg("clear_excludes", |arg| arg.help(messages.clear_excludes))
                 .mut_arg("no_caption_images", |arg| {
@@ -423,6 +427,7 @@ fn run(cli: Cli, output: &mut impl Write, messages: &'static Messages) -> Result
             writeln!(output, "{} {}", messages.root_removed, root.display())?;
         }
         Some(Command::Init {
+            force,
             exclude,
             clear_excludes,
             no_caption_images,
@@ -432,6 +437,7 @@ fn run(cli: Cli, output: &mut impl Write, messages: &'static Messages) -> Result
             let mut captioner = match directory.as_deref() {
                 Some(path) => match open_optional_captioner(&cli.python, path) {
                     Ok(captioner) => captioner,
+                    Err(error) if force => return Err(error),
                     Err(error) => {
                         eprintln!(
                             "semfind: Florence-2 unavailable. Continuing without new captions. {error:#}"
@@ -442,7 +448,13 @@ fn run(cli: Cli, output: &mut impl Write, messages: &'static Messages) -> Result
                 None => None,
             };
             let progress = progress::Progress::start(messages);
-            let report = index.initialize_home_with_progress(
+            let initialize = if force {
+                Index::rebuild_home_with_progress
+            } else {
+                Index::initialize_home_with_progress
+            };
+            let report = initialize(
+                &mut index,
                 Path::new(&home),
                 &IndexOptions {
                     exclude: (clear_excludes || !exclude.is_empty()).then_some(exclude),

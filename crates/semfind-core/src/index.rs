@@ -89,6 +89,14 @@ pub enum InitProgress {
     Saving,
 }
 
+enum ScanMode<'a> {
+    Index,
+    Init {
+        force: bool,
+        progress: &'a mut dyn FnMut(InitProgress),
+    },
+}
+
 /// A snapshot of persisted index contents.
 #[derive(Debug, Serialize)]
 pub struct Status {
@@ -179,7 +187,7 @@ impl Index {
         options: &IndexOptions,
         model: &mut impl Embedder,
     ) -> Result<IndexReport> {
-        self.synchronize_sources(root, options, None, None, model, None)
+        self.synchronize_sources(root, options, ScanMode::Index, None, model, None)
     }
 
     /// Refresh the installed command catalog alongside the ordinary index sources.
@@ -194,7 +202,7 @@ impl Index {
             cfg!(target_os = "linux"),
             "index --manpages is supported on Linux"
         );
-        self.synchronize_sources(root, options, None, Some(distro), model, None)
+        self.synchronize_sources(root, options, ScanMode::Index, Some(distro), model, None)
     }
 
     /// Synchronize a selected folder and caption its supported images locally.
@@ -210,7 +218,14 @@ impl Index {
             manpages.is_none() || cfg!(target_os = "linux"),
             "index --manpages is supported on Linux"
         );
-        self.synchronize_sources(Some(root), options, None, manpages, model, Some(captioner))
+        self.synchronize_sources(
+            Some(root),
+            options,
+            ScanMode::Index,
+            manpages,
+            model,
+            Some(captioner),
+        )
     }
 
     /// Synchronize the home directory, installed desktop applications, local commands and catalogs.
@@ -244,12 +259,54 @@ impl Index {
         captioner: Option<&mut dyn ImageCaptioner>,
         mut progress: impl FnMut(InitProgress),
     ) -> Result<IndexReport> {
+        self.scan_home(
+            home,
+            options,
+            model,
+            captioner,
+            ScanMode::Init {
+                force: false,
+                progress: &mut progress,
+            },
+        )
+    }
+
+    /// Rebuild all registered sources and initialize the home directory in one transaction.
+    /// The caller may select a different embedding model for the rebuilt index.
+    pub fn rebuild_home_with_progress(
+        &mut self,
+        home: &Path,
+        options: &IndexOptions,
+        model: &mut impl Embedder,
+        captioner: Option<&mut dyn ImageCaptioner>,
+        mut progress: impl FnMut(InitProgress),
+    ) -> Result<IndexReport> {
+        self.scan_home(
+            home,
+            options,
+            model,
+            captioner,
+            ScanMode::Init {
+                force: true,
+                progress: &mut progress,
+            },
+        )
+    }
+
+    fn scan_home(
+        &mut self,
+        home: &Path,
+        options: &IndexOptions,
+        model: &mut impl Embedder,
+        captioner: Option<&mut dyn ImageCaptioner>,
+        mode: ScanMode<'_>,
+    ) -> Result<IndexReport> {
         ensure!(cfg!(target_os = "linux"), "init is supported on Linux");
         ensure!(home.is_absolute(), "HOME must be an absolute path");
         self.synchronize_sources(
             Some(home),
             options,
-            Some(&mut progress),
+            mode,
             Some(Distro::current()),
             model,
             captioner,
@@ -260,14 +317,16 @@ impl Index {
         &mut self,
         root: Option<&Path>,
         options: &IndexOptions,
-        progress: Option<&mut dyn FnMut(InitProgress)>,
+        mode: ScanMode<'_>,
         local_command_distro: Option<Distro>,
         model: &mut impl Embedder,
         captions: Option<&mut dyn ImageCaptioner>,
     ) -> Result<IndexReport> {
-        let initializing = progress.is_some();
         let mut ignore_progress = |_| {};
-        let progress = progress.unwrap_or(&mut ignore_progress);
+        let (initializing, force, progress): (_, _, &mut dyn FnMut(InitProgress)) = match mode {
+            ScanMode::Index => (false, false, &mut ignore_progress),
+            ScanMode::Init { force, progress } => (true, force, progress),
+        };
         ensure!(
             captions
                 .as_ref()
@@ -291,12 +350,20 @@ impl Index {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut report = IndexReport::default();
+        if force {
+            // Reset vector-space metadata together with the vectors it describes.
+            tx.execute(
+                "DELETE FROM metadata WHERE key IN ('model', 'dimensions')",
+                [],
+            )?;
+            report.removed = tx.execute("DELETE FROM sources", [])?;
+        }
         check_model(&tx, model)?;
         tx.execute(
             "INSERT OR IGNORE INTO metadata VALUES ('model', ?1)",
             [model.identity()],
         )?;
-        let mut report = IndexReport::default();
         progress(InitProgress::Catalogs);
         synchronize_catalog(&tx, model, &mut report)?;
         synchronize_commands(&tx, model, &mut report)?;
@@ -317,33 +384,50 @@ impl Index {
                 );
             }
             tx.execute("INSERT OR IGNORE INTO roots(path) VALUES (?1)", [name])?;
-            let exclusions = if let Some(exclusions) = &options.exclude {
+            if let Some(exclusions) = &options.exclude {
                 tx.execute(
                     "UPDATE roots SET exclusions=?1 WHERE path=?2",
                     params![serde_json::to_string(exclusions)?, name],
                 )?;
-                exclusions.clone()
-            } else {
+            }
+            let mut scan_roots = vec![root.clone()];
+            if force {
+                for path in existing {
+                    let path = Path::new(&path);
+                    scan_roots.push(files::root(path).with_context(|| {
+                        format!("rebuild indexed directory {}", path.display())
+                    })?);
+                }
+            }
+            let mut captions = captions.map(|captioner| CaptionScan {
+                captioner,
+                required: !initializing || force,
+            });
+            progress(InitProgress::Files(0));
+            let mut discovered = 0;
+            let mut report_file = || {
+                discovered += 1;
+                progress(InitProgress::Files(discovered));
+            };
+            for directory in scan_roots {
                 let encoded: String = tx.query_row(
                     "SELECT exclusions FROM roots WHERE path=?1",
-                    [name],
+                    [directory
+                        .to_str()
+                        .context("index roots must be valid UTF-8")?],
                     |row| row.get(0),
                 )?;
-                serde_json::from_str(&encoded)?
-            };
-            let captions = captions.map(|captioner| CaptionScan {
-                captioner,
-                required: !initializing,
-            });
-            synchronize_files(
-                &tx,
-                &root,
-                &exclusions,
-                model,
-                captions,
-                &mut report,
-                progress,
-            )?;
+                let exclusions: Vec<PathBuf> = serde_json::from_str(&encoded)?;
+                synchronize_files(
+                    &tx,
+                    &directory,
+                    &exclusions,
+                    model,
+                    &mut captions,
+                    &mut report,
+                    &mut report_file,
+                )?;
+            }
             if initializing {
                 progress(InitProgress::Applications);
                 let applications = applications::discover(&root)?;
@@ -797,9 +881,9 @@ fn synchronize_files(
     root: &Path,
     exclusions: &[PathBuf],
     model: &mut impl Embedder,
-    mut captions: Option<CaptionScan<'_>>,
+    captions: &mut Option<CaptionScan<'_>>,
     report: &mut IndexReport,
-    progress: &mut dyn FnMut(InitProgress),
+    report_file: &mut dyn FnMut(),
 ) -> Result<()> {
     let root_name = root.to_str().context("index roots must be valid UTF-8")?;
     tx.execute_batch(
@@ -825,8 +909,6 @@ fn synchronize_files(
                         }
                     }))
         });
-    let mut discovered = 0;
-    progress(InitProgress::Files(discovered));
     for entry in walker {
         let entry = entry.context("scan directory (changes rolled back)")?;
         if !entry.file_type().is_file() {
@@ -843,8 +925,7 @@ fn synchronize_files(
         let Some(kind) = FileKind::from_extension(&extension) else {
             continue;
         };
-        discovered += 1;
-        progress(InitProgress::Files(discovered));
+        report_file();
         let key = path.to_str().context("file paths must be valid UTF-8")?;
         let title = entry
             .file_name()
@@ -920,7 +1001,7 @@ fn synchronize_files(
                             &error
                                 .context("Florence-2 unavailable. Continuing without new captions"),
                         );
-                        captions = None;
+                        *captions = None;
                         if let Some((id, _)) = stored {
                             report.unchanged += 1;
                             tx.execute("INSERT INTO seen VALUES (?1)", [id])?;

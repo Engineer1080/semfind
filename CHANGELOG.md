@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.5
+
+- Add `semfind init --force` to rebuild the home index, all registered directories, and the application, settings, and command catalogs. Saved exclusions apply to the rebuild.
+- Rebuild the index in one transaction and roll it back on failure. Select a different embedding model during the rebuild to switch models in place.
+
 ## 0.2.4
 
 - Show the current phase, elapsed time, and discovered file count during interactive `semfind init` runs. Progress appears on terminal stderr, and stdout still carries the final summary.

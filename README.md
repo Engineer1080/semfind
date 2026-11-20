@@ -95,7 +95,7 @@ semfind init
 semfind 'How do I find files modified today?'
 ```
 
-Keep the same model and index settings for subsequent searches. Use a new index directory when changing models or weights. Each index records the exact embedding identity and refuses to combine incompatible vectors.
+Keep the same model and index settings for subsequent searches. To change models or weights, use a new index directory or rebuild the current index with `semfind init --force`. Each index records the exact embedding identity and refuses to combine incompatible vectors.
 
 #### Use your own model
 
@@ -114,7 +114,7 @@ Set `--model-dir` or `SEMFIND_MODEL_DIR` to a local directory. Use this setting 
 
 `pooling` is required. Use `mean` for attention-masked mean pooling, `cls` for the first token, or `sentence` for an already pooled output of shape `[batch, dimensions]`. The other settings are optional. The default output name is `last_hidden_state`, the token limit is 512, prefixes are empty, and the similarity cutoff is disabled unless specified. The ONNX graph must run on CPU with batched INT64 inputs named `input_ids`, `attention_mask`, or `token_type_ids` and produce one vector of up to 4096 dimensions per input after pooling.
 
-Use a separate index for your model. Changes to the weights, tokenizer, or encoding settings require reindexing. You can adjust the similarity cutoff without reindexing.
+Changes to the weights, tokenizer, or encoding settings require a full rebuild or a separate index. You can adjust the similarity cutoff without reindexing.
 
 ### Run inference on an NVIDIA GPU
 
@@ -156,6 +156,10 @@ semfind status
 ```
 
 Run `semfind init` again to refresh the home directory, desktop applications, and local commands. Home exclusions follow the same rules as `semfind index`. If a saved root overlaps your home directory, use `semfind unindex` with that root before adopting the whole home directory. Reapply any exclusions you want to keep.
+
+Run `semfind init --force` to rebuild the selected index from scratch. It rescans the home directory and all registered directories with their saved exclusions. It also rebuilds the desktop application, settings, and command catalogs. All registered directories must be accessible. Semfind writes the rebuilt index in one transaction and rolls back if the rebuild fails. The final report counts the replaced entries as removed and the newly indexed entries as written.
+
+During a forced rebuild, configured Florence-2 captioning applies to all scanned directories. With `--no-caption-images` or without a local Florence-2 model, the rebuilt index stores image filenames and paths. To switch the embedding model in place, select the new model when running `init --force` and use the same selection for searches.
 
 To start with a smaller index, select a directory instead.
 

@@ -3,6 +3,7 @@ use semfind_core::{Category, Language};
 pub(crate) struct Messages {
     pub about: &'static str,
     pub init: &'static str,
+    pub force_init: &'static str,
     pub index: &'static str,
     pub status: &'static str,
     pub unindex: &'static str,
@@ -66,6 +67,7 @@ impl Messages {
 const EN: Messages = Messages {
     about: env!("CARGO_PKG_DESCRIPTION"),
     init: "Index your home directory, desktop apps, and local commands.",
+    force_init: "Rebuild the entire index, including all registered directories.",
     index: "Update a directory and the built-in catalogs. Omit the directory for catalogs only.",
     status: "Show indexed directories and counts.",
     unindex: "Remove a directory and its entries from the index.",
@@ -129,6 +131,7 @@ const EN: Messages = Messages {
 const DE: Messages = Messages {
     about: "Lokale Datei-, Programm- und Befehlssuche im Linux-Terminal",
     init: "Home-Ordner, Desktop-Programme und lokale Befehle indexieren.",
+    force_init: "Den gesamten Index einschließlich aller registrierten Ordner neu aufbauen.",
     index: "Einen Ordner und die eingebauten Kataloge aktualisieren. Ohne Ordner werden nur die Kataloge aktualisiert.",
     status: "Indexierte Ordner und Anzahlen anzeigen.",
     unindex: "Einen Ordner mit seinen Einträgen aus dem Index austragen.",
@@ -192,6 +195,7 @@ const DE: Messages = Messages {
 const RU: Messages = Messages {
     about: "Локальный поиск файлов, приложений и команд в терминале Linux",
     init: "Индексировать домашний каталог, приложения и локальные команды.",
+    force_init: "Перестроить весь индекс, включая все зарегистрированные каталоги.",
     index: "Обновить индекс каталога и встроенные справочники. Без каталога обновляются только справочники.",
     status: "Показать проиндексированные каталоги и количество записей.",
     unindex: "Удалить каталог и его записи из индекса.",
@@ -255,6 +259,7 @@ const RU: Messages = Messages {
 const PT: Messages = Messages {
     about: "Busca local de arquivos, aplicativos e comandos no terminal do Linux",
     init: "Indexar a pasta pessoal, os aplicativos e os comandos locais.",
+    force_init: "Reconstruir todo o índice, incluindo as pastas registadas.",
     index: "Atualizar o índice de uma pasta e os catálogos integrados. Omita a pasta para atualizar só os catálogos.",
     status: "Mostrar as pastas indexadas e as contagens.",
     unindex: "Remover uma pasta e suas entradas do índice.",
@@ -318,6 +323,7 @@ const PT: Messages = Messages {
 const FR: Messages = Messages {
     about: "Recherche locale de fichiers, d’applications et de commandes dans le terminal Linux",
     init: "Indexer le dossier personnel, les applications et les commandes locales.",
+    force_init: "Reconstruire l’ensemble de l’index, y compris les dossiers enregistrés.",
     index: "Actualiser l’index d’un dossier et les catalogues intégrés. Omettez le dossier pour actualiser uniquement les catalogues.",
     status: "Afficher les dossiers indexés et le nombre d’entrées.",
     unindex: "Retirer un dossier et ses entrées de l’index.",
@@ -381,6 +387,7 @@ const FR: Messages = Messages {
 const ES: Messages = Messages {
     about: "Búsqueda local de archivos, aplicaciones y comandos en la terminal de Linux",
     init: "Indexar la carpeta personal, las aplicaciones y los comandos locales.",
+    force_init: "Reconstruir todo el índice, incluidas las carpetas registradas.",
     index: "Actualizar el índice de una carpeta y los catálogos integrados. Omite la carpeta para actualizar solo los catálogos.",
     status: "Mostrar las carpetas indexadas y el número de entradas.",
     unindex: "Quitar una carpeta y sus entradas del índice.",
@@ -444,6 +451,7 @@ const ES: Messages = Messages {
 const IT: Messages = Messages {
     about: "Ricerca locale di file, applicazioni e comandi nel terminale Linux",
     init: "Indicizzare la cartella personale, le applicazioni e i comandi locali.",
+    force_init: "Ricostruire l’intero indice, incluse tutte le cartelle registrate.",
     index: "Aggiornare l’indice di una cartella e i cataloghi integrati. Ometti la cartella per aggiornare solo i cataloghi.",
     status: "Mostrare le cartelle indicizzate e il numero di voci.",
     unindex: "Rimuovere una cartella e le relative voci dall’indice.",

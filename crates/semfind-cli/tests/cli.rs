@@ -564,6 +564,35 @@ fn real_model_init_indexes_home_desktop_applications_and_manuals() -> Result<()>
     assert_eq!(status["files"], 1, "{status}");
     assert_eq!(status["applications"], 0, "{status}");
     assert_eq!(status["commands"], commands - 1, "{status}");
+
+    let extra = temp.path().join("extra");
+    fs::create_dir_all(extra.join("Private"))?;
+    fs::write(extra.join("extra.txt"), "Another indexed document")?;
+    fs::write(
+        extra.join("Private/secret.txt"),
+        "Another excluded document",
+    )?;
+    run(&["index", extra.to_str().unwrap(), "--exclude", "Private"])?;
+    let before: serde_json::Value = serde_json::from_slice(&run(&["status", "--json"])?)?;
+    let rebuilt = String::from_utf8(run(&["init", "--force", "--no-caption-images"])?)?;
+    assert!(
+        rebuilt.contains(&format!("Written: {} | Unchanged: 0", 6 + commands)),
+        "{rebuilt}"
+    );
+    let after: serde_json::Value = serde_json::from_slice(&run(&["status", "--json"])?)?;
+    assert_eq!(after, before);
+    assert_eq!(after["files"], 2, "{after}");
+
+    fs::write(home.join("notes.txt"), "New content that should roll back")?;
+    let failed_rebuild = command()
+        .env("MANPATH", &invalid_manual_root)
+        .args(["init", "--force", "--no-caption-images"])
+        .output()?;
+    assert_eq!(failed_rebuild.status.code(), Some(1));
+    let hits: Vec<Hit> = serde_json::from_slice(&run(&["notes.txt", "--limit", "1", "--json"])?)?;
+    assert_eq!(hits[0].snippet, "Document available for search");
+    let after_failure: serde_json::Value = serde_json::from_slice(&run(&["status", "--json"])?)?;
+    assert_eq!(after_failure, before);
     Ok(())
 }
 
