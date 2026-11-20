@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, ensure};
-use semfind_core::{Category, Distro, Hit};
+use semfind_core::{Category, Distro, Hit, HitLocation};
 use std::{
     env, fs,
     io::{BufRead, BufReader, Write},
@@ -577,7 +577,11 @@ fn real_model_searches_across_languages_and_indexes_pdf() -> Result<()> {
     )?;
     fs::write(
         root.join("c.pdf"),
-        pdf("Workshop report: ERROR E-0042. The pump outlet was blocked."),
+        pdf(&[
+            "Workshop report introduction.",
+            "",
+            "Workshop report: ERROR E-0042. The pump outlet was blocked.",
+        ]),
     )?;
     fs::write(root.join("workshop.png"), b"metadata-only image fixture")?;
     fs::write(root.join("workshop.jpg"), b"metadata-only image fixture")?;
@@ -595,6 +599,13 @@ fn real_model_searches_across_languages_and_indexes_pdf() -> Result<()> {
         "1",
     ])?;
     assert_eq!(german[0].title, "a.txt");
+    assert_eq!(
+        german[0].location,
+        Some(HitLocation::Lines {
+            line_start: 1,
+            line_end: 1,
+        })
+    );
     let english = search(&[
         "How do I make a loaf at home?",
         "--type",
@@ -606,6 +617,10 @@ fn real_model_searches_across_languages_and_indexes_pdf() -> Result<()> {
     let pdf = search(&["E-0042", "--type", "pdf", "--limit", "1"])?;
     assert_eq!(pdf[0].title, "c.pdf");
     assert!(pdf[0].exact && pdf[0].snippet.contains("pump outlet"));
+    assert!(!pdf[0].snippet.contains("introduction"));
+    assert_eq!(pdf[0].location, Some(HitLocation::Page { page: 3 }));
+    let terminal = success(cli(&index).args(["E-0042", "--type", "pdf"]).output()?)?;
+    assert!(String::from_utf8(terminal)?.contains("c.pdf#page=3"));
     let missing_python = temp.path().join("missing-python");
     let media_search = |args: &[&str]| -> Result<Vec<Hit>> {
         let result = success(
@@ -629,6 +644,7 @@ fn real_model_searches_across_languages_and_indexes_pdf() -> Result<()> {
     let videos = media_search(&["workshop", "--kind", "video"])?;
     assert_eq!(videos.len(), 1);
     assert_eq!(videos[0].title, "workshop.mp4");
+    assert!(videos[0].location.is_none());
     assert_eq!(
         media_search(&["workshop", "--type", "mp4"])?[0].title,
         "workshop.mp4"
@@ -641,6 +657,7 @@ fn real_model_searches_across_languages_and_indexes_pdf() -> Result<()> {
         "1",
     ])?;
     assert_eq!(settings[0].id, "display.brightness");
+    assert!(settings[0].location.is_none());
     let retention = search(&[
         "Wie lange sollen personenbezogene Daten gespeichert werden?",
         "--type",
@@ -659,15 +676,30 @@ fn real_model_searches_across_languages_and_indexes_pdf() -> Result<()> {
     Ok(())
 }
 
-fn pdf(text: &str) -> Vec<u8> {
-    let stream = format!("BT /F1 14 Tf 25 100 Td ({text}) Tj ET\n");
-    let objects = [
+fn pdf(pages: &[&str]) -> Vec<u8> {
+    let children = (0..pages.len())
+        .map(|index| format!("{} 0 R", 4 + index * 2))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut objects = vec![
         "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
-        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_owned(),
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>".to_owned(),
+        format!(
+            "<< /Type /Pages /Kids [{children}] /Count {} >>",
+            pages.len()
+        ),
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_owned(),
-        format!("<< /Length {} >>\nstream\n{stream}endstream", stream.len()),
     ];
+    for text in pages {
+        let contents = objects.len() + 2;
+        let stream = format!("BT /F1 14 Tf 25 100 Td ({text}) Tj ET\n");
+        objects.push(format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 200] /Resources << /Font << /F1 3 0 R >> >> /Contents {contents} 0 R >>"
+        ));
+        objects.push(format!(
+            "<< /Length {} >>\nstream\n{stream}endstream",
+            stream.len()
+        ));
+    }
     let mut doc = String::from("%PDF-1.4\n");
     let mut offsets = String::from("0000000000 65535 f \n");
     for (i, object) in objects.iter().enumerate() {
@@ -675,8 +707,9 @@ fn pdf(text: &str) -> Vec<u8> {
         doc.push_str(&format!("{} 0 obj\n{object}\nendobj\n", i + 1));
     }
     let start = doc.len();
+    let size = objects.len() + 1;
     doc.push_str(&format!(
-        "xref\n0 6\n{offsets}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{start}\n%%EOF\n"
+        "xref\n0 {size}\n{offsets}trailer\n<< /Size {size} /Root 1 0 R >>\nstartxref\n{start}\n%%EOF\n"
     ));
     doc.into_bytes()
 }

@@ -11,7 +11,7 @@ mod search;
 mod translations;
 
 pub use commands::Distro;
-pub use files::FileKind;
+pub use files::{FileKind, HitLocation};
 pub use index::{Index, IndexOptions, IndexReport, Status};
 pub use locale::Language;
 pub use model::{Embedder, ExecutionDevice, InputKind, LocalModel};

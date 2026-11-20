@@ -2,7 +2,7 @@ use crate::{
     applications::{self, Application},
     catalog::SETTINGS,
     commands::{COMMANDS, Distro},
-    files::{self, FileKind},
+    files::{self, FileKind, HitLocation, Passage},
     manuals,
     model::{Embedder, InputKind, normalized},
     translations::catalog_texts,
@@ -36,7 +36,10 @@ CREATE INDEX IF NOT EXISTS sources_root ON sources(root);
 CREATE TABLE IF NOT EXISTS chunks (
     id INTEGER PRIMARY KEY,
     source INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
-    embedding BLOB NOT NULL
+    embedding BLOB NOT NULL,
+    line_start INTEGER,
+    line_end INTEGER,
+    page INTEGER
 );
 CREATE INDEX IF NOT EXISTS chunks_source ON chunks(source);
 CREATE VIRTUAL TABLE IF NOT EXISTS fulltext USING fts5(
@@ -46,7 +49,7 @@ INSERT INTO fulltext(fulltext, rank) VALUES('secure-delete', 1);
 CREATE TRIGGER IF NOT EXISTS delete_chunk AFTER DELETE ON chunks BEGIN
     DELETE FROM fulltext WHERE rowid = old.id;
 END;
-PRAGMA user_version = 4;
+PRAGMA user_version = 5;
 ";
 const INIT_COMPLETED_KEY: &str = "init_complete";
 
@@ -97,8 +100,8 @@ impl Index {
         )?;
         let version = schema_version(&conn)?;
         match version {
-            0..=3 => migrate(&mut conn)?,
-            4 => (),
+            0..=4 => migrate(&mut conn)?,
+            5 => (),
             _ => anyhow::bail!("unsupported database schema version {version}"),
         }
         Ok(Self { conn })
@@ -296,7 +299,8 @@ fn migrate(conn: &mut Connection) -> Result<()> {
     conn.pragma_update(None, "foreign_keys", false)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     // Another process may have migrated the index while we waited for the lock.
-    match schema_version(&tx)? {
+    let version = schema_version(&tx)?;
+    match version {
         0 => tx.execute_batch(&format!(
             "CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS roots (path TEXT PRIMARY KEY, exclusions TEXT NOT NULL DEFAULT '[]');
@@ -320,8 +324,16 @@ fn migrate(conn: &mut Connection) -> Result<()> {
             )?;
             ensure!(!invalid, "index contains invalid foreign keys");
         }
-        4 => (),
+        4 | 5 => (),
         version => anyhow::bail!("unsupported database schema version {version}"),
+    }
+    if (1..=4).contains(&version) {
+        tx.execute_batch(
+            "ALTER TABLE chunks ADD COLUMN line_start INTEGER;
+             ALTER TABLE chunks ADD COLUMN line_end INTEGER;
+             ALTER TABLE chunks ADD COLUMN page INTEGER;
+             PRAGMA user_version = 5;",
+        )?;
     }
     tx.commit()?;
     conn.pragma_update(None, "foreign_keys", true)?;
@@ -371,10 +383,10 @@ fn source_state(conn: &Connection, key: &str) -> Result<Option<(i64, Vec<u8>)>> 
         .optional()?)
 }
 
-fn write_source(
+fn write_source<'a>(
     tx: &Transaction<'_>,
     source: Source<'_>,
-    texts: &[&str],
+    passages: Option<impl Iterator<Item = Passage<'a>>>,
     digest: &[u8],
     model: &mut impl Embedder,
 ) -> Result<i64> {
@@ -399,13 +411,13 @@ fn write_source(
         |row| row.get(0),
     )?;
     tx.execute("DELETE FROM chunks WHERE source = ?1", [id])?;
-    if texts.is_empty() {
-        store_chunk(tx, id, &source, "", &[])?;
+    let Some(passages) = passages else {
+        store_chunk(tx, id, &source, &Passage::unlocated(""), &[])?;
         return Ok(id);
-    }
-    let mut parts = texts.iter().flat_map(|text| files::chunks(text)).peekable();
+    };
+    let mut parts = passages.peekable();
     if parts.peek().is_none() {
-        write_chunks(tx, id, &source, &[""], model)?;
+        write_chunks(tx, id, &source, &[Passage::unlocated("")], model)?;
     }
     loop {
         let batch: Vec<_> = parts.by_ref().take(8).collect();
@@ -421,13 +433,13 @@ fn write_chunks(
     tx: &Transaction<'_>,
     id: i64,
     source: &Source<'_>,
-    parts: &[&str],
+    parts: &[Passage<'_>],
     model: &mut impl Embedder,
 ) -> Result<()> {
     let title: String = source.title.chars().take(256).collect();
     let input: Vec<_> = parts
         .iter()
-        .map(|part| format!("{title}\n{part}"))
+        .map(|part| format!("{title}\n{}", part.text))
         .collect();
     let vectors = model
         .encode(InputKind::Passage, &input)
@@ -436,7 +448,7 @@ fn write_chunks(
         vectors.len() == parts.len(),
         "unexpected number of embeddings"
     );
-    for (text, vector) in parts.iter().zip(vectors) {
+    for (passage, vector) in parts.iter().zip(vectors) {
         let vector = normalized(vector)?;
         let width = vector.len();
         tx.execute(
@@ -453,7 +465,7 @@ fn write_chunks(
             "inconsistent embedding dimensions"
         );
         let bytes: Vec<_> = vector.into_iter().flat_map(f32::to_le_bytes).collect();
-        store_chunk(tx, id, source, text, &bytes)?;
+        store_chunk(tx, id, source, passage, &bytes)?;
     }
     Ok(())
 }
@@ -462,7 +474,7 @@ fn store_chunk(
     tx: &Transaction<'_>,
     id: i64,
     source: &Source<'_>,
-    text: &str,
+    passage: &Passage<'_>,
     embedding: &[u8],
 ) -> Result<()> {
     let searchable_title = if source.key.starts_with(manuals::KEY_PREFIX) {
@@ -470,13 +482,21 @@ fn store_chunk(
     } else {
         format!("{} {}", source.title, source.key)
     };
+    let (line_start, line_end, page) = match passage.location {
+        Some(HitLocation::Lines {
+            line_start,
+            line_end,
+        }) => (Some(line_start), Some(line_end), None),
+        Some(HitLocation::Page { page }) => (None, None, Some(page)),
+        None => (None, None, None),
+    };
     tx.execute(
-        "INSERT INTO chunks(source, embedding) VALUES (?1, ?2)",
-        params![id, embedding],
+        "INSERT INTO chunks(source, embedding, line_start, line_end, page) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![id, embedding, line_start, line_end, page],
     )?;
     tx.execute(
         "INSERT INTO fulltext(rowid, title, body) VALUES (?1, ?2, ?3)",
-        params![tx.last_insert_rowid(), searchable_title, text],
+        params![tx.last_insert_rowid(), searchable_title, passage.text],
     )?;
     Ok(())
 }
@@ -646,7 +666,12 @@ fn sync_catalog_entry(
         report.unchanged += 1;
         return Ok(id);
     }
-    let id = write_source(tx, source, texts, digest, model)?;
+    let passages = (!texts.is_empty()).then(|| {
+        texts
+            .iter()
+            .flat_map(|text| files::chunks(text).map(|(_, chunk)| Passage::unlocated(chunk)))
+    });
+    let id = write_source(tx, source, passages, digest, model)?;
     report.written += 1;
     Ok(id)
 }
@@ -743,7 +768,7 @@ fn synchronize_files(
         };
         let digest = match &bytes {
             Some(bytes) => Sha256::new()
-                .chain_update(b"extract-v1\0")
+                .chain_update(b"extract-v2\0")
                 .chain_update(bytes)
                 .finalize(),
             None => Sha256::digest(b"file-name-v1"),
@@ -776,7 +801,8 @@ fn synchronize_files(
                     distro: None,
                     example: None,
                 },
-                text.as_deref().as_slice(),
+                text.as_deref()
+                    .map(|text| files::file_passages(text, extension == "pdf")),
                 &digest,
                 model,
             )?;

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail, ensure};
+use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File},
     io::{Read, Write},
@@ -22,6 +23,38 @@ pub enum FileKind {
     Text,
     Image,
     Video,
+}
+
+/// The position of an indexed passage in its source file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum HitLocation {
+    /// One-based inclusive line numbers in a text file.
+    Lines {
+        /// First line containing passage text.
+        line_start: u32,
+        /// Last line containing passage text.
+        line_end: u32,
+    },
+    /// One-based page number in a PDF file.
+    Page {
+        /// Physical page number starting from the first page of the document.
+        page: u32,
+    },
+}
+
+pub(crate) struct Passage<'a> {
+    pub text: &'a str,
+    pub location: Option<HitLocation>,
+}
+
+impl<'a> Passage<'a> {
+    pub fn unlocated(text: &'a str) -> Self {
+        Self {
+            text,
+            location: None,
+        }
+    }
 }
 
 impl FileKind {
@@ -170,7 +203,7 @@ pub(crate) fn extract(extension: &str, bytes: Vec<u8>) -> Result<String> {
 
 fn pdf_text(bytes: Vec<u8>) -> Result<String> {
     let mut child = Command::new("pdftotext")
-        .args(["-enc", "UTF-8", "-nopgbrk", "-", "-"])
+        .args(["-enc", "UTF-8", "-", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -201,14 +234,46 @@ fn pdf_text(bytes: Vec<u8>) -> Result<String> {
         ensure!(status?.success(), "pdftotext could not extract text");
         written?;
     }
-    let text = String::from_utf8_lossy(&output).trim().to_owned();
-    if text.is_empty() {
+    let text = String::from_utf8_lossy(&output);
+    if text.trim().is_empty() {
         bail!("PDF has no extractable text");
     }
-    Ok(text)
+    Ok(text.into_owned())
 }
 
-pub(crate) fn chunks(text: &str) -> impl Iterator<Item = &str> {
+pub(crate) fn file_passages(text: &str, pdf: bool) -> impl Iterator<Item = Passage<'_>> {
+    // pdftotext separates physical pages with form feeds, including blank pages.
+    text.split(move |ch| pdf && ch == '\x0c')
+        .enumerate()
+        .flat_map(move |(page_index, section)| {
+            let mut previous_start = 0;
+            let mut line_start = 1;
+            chunks(section).map(move |(start, text)| {
+                let location = if pdf {
+                    HitLocation::Page {
+                        page: page_index as u32 + 1,
+                    }
+                } else {
+                    line_start += newline_count(&section[previous_start..start]);
+                    previous_start = start;
+                    HitLocation::Lines {
+                        line_start,
+                        line_end: line_start + newline_count(text),
+                    }
+                };
+                Passage {
+                    text,
+                    location: Some(location),
+                }
+            })
+        })
+}
+
+fn newline_count(text: &str) -> u32 {
+    text.bytes().filter(|byte| *byte == b'\n').count() as u32
+}
+
+pub(crate) fn chunks(text: &str) -> impl Iterator<Item = (usize, &str)> {
     let mut start = 0;
     std::iter::from_fn(move || {
         while start < text.len() {
@@ -226,7 +291,10 @@ pub(crate) fn chunks(text: &str) -> impl Iterator<Item = &str> {
             } else {
                 end
             };
-            let chunk = rest[..end].trim();
+            let window = &rest[..end];
+            let trimmed_start = window.trim_start();
+            let chunk = trimmed_start.trim_end();
+            let chunk_start = start + window.len() - trimmed_start.len();
             start += if end == rest.len() {
                 end
             } else {
@@ -237,7 +305,7 @@ pub(crate) fn chunks(text: &str) -> impl Iterator<Item = &str> {
                     .map_or(end, |(i, _)| i.max(1))
             };
             if !chunk.is_empty() {
-                return Some(chunk);
+                return Some((chunk_start, chunk));
             }
         }
         None
@@ -325,10 +393,33 @@ mod tests {
     #[test]
     fn splitting_overlaps_and_handles_unicode() {
         let body = format!("{} {}", "ä".repeat(900), "privacy");
-        let parts: Vec<_> = chunks(&body).collect();
+        let parts: Vec<_> = chunks(&body).map(|(_, text)| text).collect();
         assert_eq!(parts.len(), 2);
         assert_eq!(parts[0].chars().count(), CHUNK_SIZE);
         assert!(parts[1].ends_with("privacy"));
         assert_eq!(parts[1].chars().count(), 900 - CHUNK_SIZE + OVERLAP + 8);
+    }
+
+    #[test]
+    fn text_passage_locations_account_for_trimming_and_overlap() {
+        let lines = vec!["ä".repeat(100); 9].join("\r\n");
+        let body = format!(" \r\n\r\n{lines}\r\nlast line\r\n");
+        let parts: Vec<_> = file_passages(&body, false).collect();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(
+            parts[0].location,
+            Some(HitLocation::Lines {
+                line_start: 3,
+                line_end: 8,
+            })
+        );
+        assert_eq!(
+            parts[1].location,
+            Some(HitLocation::Lines {
+                line_start: 8,
+                line_end: 12,
+            })
+        );
+        assert!(parts[1].text.ends_with("last line"));
     }
 }

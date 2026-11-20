@@ -27,6 +27,10 @@ semfind "How do I show free disk space?" --category command --limit 3 --json
 
 This query can return `df` with the example `df -h`. For file results, the JSON includes the source path and a matching text excerpt that a program or agent can use to inspect the original file. Use `semfind status --json` to check which directories are indexed.
 
+File results can also include a `location` for the passage behind the snippet. Text files use one-based, inclusive line numbers such as `{"line_start":12,"line_end":17}`. PDFs use a one-based physical page number such as `{"page":3}`. The terminal shows these as `notes.md:12-17` or `report.pdf#page=3`. The JSON field is optional.
+
+Existing indexes remain searchable after Semfind 0.2.1 automatically upgrades them to schema 5. Use 0.2.1 or newer with an upgraded index. Run `semfind index /path/to/folder` for each indexed folder, or `semfind init` for a home index, to add locations. The first scan after the upgrade reprocesses previously indexed text files and PDFs. Locations refer to the indexed text and refresh on rescan.
+
 With `--json`, search writes a JSON array to stdout, including `[]` for zero results. Diagnostics go to stderr. Exit codes are `0` for success (including zero hits), `1` for an operational error, and `2` for invalid CLI usage.
 
 Add `--time` to report the search duration in milliseconds on stderr. Measurement starts after the index is opened and includes model startup when needed, retrieval, and ranking. Result formatting is outside the measurement.

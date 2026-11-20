@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- Show one-based line ranges for text passages and physical page numbers for PDF passages. JSON and streaming results include an optional `location` field.
+- Upgrade existing indexes to schema 5 on open. Existing results remain searchable, and the first rescan adds locations to indexed text files and PDFs.
+
 ## 0.2.0
 
 - Add `semfind search --stdin` for programs and AI agents. Read one UTF-8 query per line, flush one JSON result array per query, and reuse the index and model worker across requests.

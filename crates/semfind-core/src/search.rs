@@ -1,6 +1,6 @@
 use crate::{
     commands::Distro,
-    files::{self, FileKind},
+    files::{self, FileKind, HitLocation},
     index::{Index, check_model},
     manuals,
     model::{Embedder, InputKind, normalized},
@@ -83,6 +83,9 @@ pub struct Hit {
     pub score: f64,
     pub exact: bool,
     pub snippet: String,
+    /// Source location for the passage used to build the snippet, when indexed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<HitLocation>,
 }
 
 struct Candidate {
@@ -242,6 +245,7 @@ impl Index {
                     },
                     score: 0.0,
                     snippet: String::new(),
+                    location: None,
                 };
                 candidates.insert(
                     id,
@@ -368,7 +372,11 @@ impl Index {
         });
         let mut hits = Vec::new();
         {
-            let mut body = tx.prepare("SELECT body FROM fulltext WHERE rowid=?1")?;
+            let mut body = tx.prepare(
+                "SELECT fulltext.body, chunks.line_start, chunks.line_end, chunks.page
+                 FROM fulltext JOIN chunks ON chunks.id=fulltext.rowid
+                 WHERE fulltext.rowid=?1",
+            )?;
             for mut item in ranked.into_iter().take(options.limit) {
                 let chunk = item
                     .exact_chunk
@@ -385,19 +393,26 @@ impl Index {
                 } else {
                     chunk
                 };
-                if let Some(chunk) = chunk {
-                    let text: Option<String> =
-                        body.query_row([chunk], |row| row.get(0)).optional()?;
-                    item.hit.snippet = text.map_or_else(String::new, |text| {
-                        snippet(
-                            &text,
-                            if item.exact_chunk.is_some() {
-                                Some(&needle)
-                            } else {
-                                None
-                            },
-                        )
-                    });
+                if let Some(chunk) = chunk
+                    && let Some((text, location)) = body
+                        .query_row([chunk], |row| {
+                            let location = match (row.get(1)?, row.get(2)?, row.get(3)?) {
+                                (Some(line_start), Some(line_end), None) => {
+                                    Some(HitLocation::Lines {
+                                        line_start,
+                                        line_end,
+                                    })
+                                }
+                                (None, None, Some(page)) => Some(HitLocation::Page { page }),
+                                _ => None,
+                            };
+                            Ok((row.get::<_, String>(0)?, location))
+                        })
+                        .optional()?
+                {
+                    let exact = item.exact_chunk.is_some().then_some(needle.as_str());
+                    item.hit.snippet = snippet(&text, exact);
+                    item.hit.location = location;
                 }
                 hits.push(item.hit);
             }

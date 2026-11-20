@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, ensure};
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use semfind_core::{
-    Category, Distro, ExecutionDevice, FileKind, Index, IndexOptions, IndexReport, Language,
-    LocalModel, SearchOptions,
+    Category, Distro, ExecutionDevice, FileKind, HitLocation, Index, IndexOptions, IndexReport,
+    Language, LocalModel, SearchOptions,
 };
 mod distro;
 mod ui;
@@ -522,7 +522,23 @@ fn run_search(
             visible(&hit.title),
             hit.score
         )?;
-        writeln!(output, "  {}", visible(&hit.id))?;
+        let id = visible(&hit.id);
+        match hit.location {
+            Some(HitLocation::Lines {
+                line_start,
+                line_end,
+            }) if line_start == line_end => {
+                writeln!(output, "  {id}:{line_start}")?;
+            }
+            Some(HitLocation::Lines {
+                line_start,
+                line_end,
+            }) => {
+                writeln!(output, "  {id}:{line_start}-{line_end}")?;
+            }
+            Some(HitLocation::Page { page }) => writeln!(output, "  {id}#page={page}")?,
+            None => writeln!(output, "  {id}")?,
+        }
         if !hit.snippet.is_empty() {
             writeln!(output, "  {}", visible(&hit.snippet))?;
         }

@@ -1,6 +1,9 @@
 use anyhow::{Result, bail};
 use rusqlite::{Connection, TransactionBehavior};
-use semfind_core::{Category, Embedder, FileKind, Index, IndexOptions, InputKind, SearchOptions};
+use semfind_core::{
+    Category, Embedder, FileKind, HitLocation, Index, IndexOptions, InputKind, SearchOptions,
+};
+use sha2::{Digest, Sha256};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -52,6 +55,23 @@ fn fixture(root: &Path, name: &str, text: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
+fn restore_legacy_passages(conn: &Connection, text: &str) -> Result<()> {
+    conn.execute_batch(
+        "ALTER TABLE chunks DROP COLUMN line_start;
+         ALTER TABLE chunks DROP COLUMN line_end;
+         ALTER TABLE chunks DROP COLUMN page;",
+    )?;
+    let digest = Sha256::new()
+        .chain_update(b"extract-v1\0")
+        .chain_update(text)
+        .finalize();
+    conn.execute(
+        "UPDATE sources SET digest = ?1 WHERE category = 'file'",
+        [digest.as_slice()],
+    )?;
+    Ok(())
+}
+
 fn new_fixture() -> Result<(tempfile::TempDir, Index, PathBuf, FixtureModel)> {
     let temp = tempfile::Builder::new().prefix("semfind-test-").tempdir()?;
     let index = Index::open(&temp.path().join("index"))?;
@@ -95,6 +115,50 @@ fn cached_search_model_initializes_only_when_needed_and_is_reused() -> Result<()
         assert_eq!(hits[0].path.as_ref(), Some(&path));
     }
     assert_eq!(starts, 1);
+    Ok(())
+}
+
+#[test]
+fn old_index_remains_searchable_and_rescan_adds_passage_locations() -> Result<()> {
+    let (temp, mut index, root, mut model) = new_fixture()?;
+    let body = "\r\n \r\nThe refrigerator is ready.\r\nWrite E-9912 before leaving.\r\n";
+    fixture(&root, "notes.md", body)?;
+    let scan = IndexOptions::default();
+    let search = SearchOptions {
+        category: Some(Category::File),
+        ..Default::default()
+    };
+    index.synchronize(Some(&root), &scan, &mut model)?;
+    drop(index);
+    let index_path = temp.path().join("index");
+    let conn = Connection::open(index_path.join("index.sqlite3"))?;
+    restore_legacy_passages(&conn, body)?;
+    conn.pragma_update(None, "user_version", 4)?;
+    drop(conn);
+
+    let mut index = Index::open(&index_path)?;
+    let old = index.search("E-9912", &search, &mut model)?;
+    assert!(old[0].exact && old[0].snippet.contains("E-9912"));
+    assert!(old[0].location.is_none());
+    assert!(serde_json::to_value(&old[0])?.get("location").is_none());
+
+    assert_eq!(
+        index.synchronize(Some(&root), &scan, &mut model)?.written,
+        1
+    );
+    let updated = index.search("E-9912", &search, &mut model)?;
+    assert_eq!(updated[0].snippet, old[0].snippet);
+    assert_eq!(
+        updated[0].location,
+        Some(HitLocation::Lines {
+            line_start: 3,
+            line_end: 4,
+        })
+    );
+    assert_eq!(
+        index.synchronize(Some(&root), &scan, &mut model)?.written,
+        0
+    );
     Ok(())
 }
 
@@ -240,13 +304,15 @@ fn existing_index_can_be_read_during_a_write_transaction() -> Result<()> {
 #[test]
 fn file_kind_filters_list_multiple_formats_and_search_media_names() -> Result<()> {
     let (temp, mut index, root, mut model) = new_fixture()?;
-    fixture(&root, "garden.txt", "Summer flowers")?;
+    let body = "Summer flowers";
+    fixture(&root, "garden.txt", body)?;
     index.synchronize(Some(&root), &IndexOptions::default(), &mut model)?;
     let original_chunks = index.status()?.chunks;
     drop(index);
     let index_dir = temp.path().join("index");
     // Emulate a pre-command database containing text and settings.
     let db = rusqlite::Connection::open(index_dir.join("index.sqlite3"))?;
+    restore_legacy_passages(&db, body)?;
     db.execute_batch(
         "PRAGMA foreign_keys = ON;
          DELETE FROM sources WHERE category = 'command';
@@ -272,7 +338,7 @@ fn file_kind_filters_list_multiple_formats_and_search_media_names() -> Result<()
     let status = index.status()?;
     assert_eq!(status.files, 5);
     assert_eq!(status.chunks, original_chunks);
-    let encoded = previously_encoded + usize::try_from(missing_chunks)?;
+    let encoded = previously_encoded + usize::try_from(missing_chunks)? + 1;
     assert_eq!(model.passages, encoded);
     drop(index);
     let mut index = Index::open(&temp.path().join("index"))?;
