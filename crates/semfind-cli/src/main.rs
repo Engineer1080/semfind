@@ -9,9 +9,10 @@ mod ui;
 use distro::DistroFilter;
 use std::{
     env,
-    io::{self, Write},
+    io::{self, BufRead, Write},
     path::{Path, PathBuf},
     process::ExitCode,
+    time::Instant,
 };
 use ui::Messages;
 
@@ -114,7 +115,7 @@ enum Command {
 
 #[derive(clap::Args)]
 struct Search {
-    /// A query, file name or identifier. Omit when listing files with --kind.
+    /// A query, file name or identifier. Omit with --stdin or when listing files with --kind.
     query: Option<String>,
     /// Restrict results to a group of file formats.
     #[arg(long = "kind", value_enum)]
@@ -132,6 +133,12 @@ struct Search {
     limit: u32,
     #[arg(long)]
     json: bool,
+    /// Report elapsed search time on stderr.
+    #[arg(long)]
+    time: bool,
+    /// Read one query per line from stdin and write one JSON result array per query.
+    #[arg(long, conflicts_with = "query")]
+    stdin: bool,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -191,8 +198,24 @@ fn main() -> ExitCode {
             }
             error.exit()
         });
-    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
-    if cli.command.is_none() && cli.search.query.is_none() && cli.search.file_kind.is_none() {
+    let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
+    if cli.search.stdin {
+        match &mut cli.command {
+            Some(Command::Search(search)) if search.query.is_none() => search.stdin = true,
+            None => {}
+            _ => command
+                .error(
+                    clap::error::ErrorKind::ArgumentConflict,
+                    "--stdin requires search without a positional query",
+                )
+                .exit(),
+        }
+    }
+    if cli.command.is_none()
+        && !cli.search.stdin
+        && cli.search.query.is_none()
+        && cli.search.file_kind.is_none()
+    {
         command
             .error(
                 clap::error::ErrorKind::MissingRequiredArgument,
@@ -200,7 +223,7 @@ fn main() -> ExitCode {
             )
             .exit();
     }
-    if matches!(&cli.command, Some(Command::Search(search)) if search.query.is_none() && search.file_kind.is_none())
+    if matches!(&cli.command, Some(Command::Search(search)) if !search.stdin && search.query.is_none() && search.file_kind.is_none())
     {
         command
             .error(
@@ -260,6 +283,8 @@ fn apply_search_help(command: clap::Command, messages: &Messages) -> clap::Comma
         ("path", messages.path),
         ("extension", messages.extension),
         ("limit", messages.limit),
+        ("time", messages.time),
+        ("stdin", messages.stdin),
     ]
     .into_iter()
     .fold(command, |cmd, (id, text)| {
@@ -413,7 +438,10 @@ fn run(cli: Cli, output: &mut impl Write, messages: &Messages) -> Result<()> {
             };
             print_index_report(output, &report, messages)?;
         }
-        Some(Command::Search(search)) => run_search(&index, search, start_model, output, messages)?,
+        Some(Command::Search(mut search)) => {
+            search.time |= cli.search.time;
+            run_search(&index, search, start_model, output, messages)?;
+        }
         None => run_search(&index, cli.search, start_model, output, messages)?,
     }
     Ok(())
@@ -439,25 +467,45 @@ fn print_index_report(
 fn run_search(
     index: &Index,
     search: Search,
-    start_model: impl FnOnce() -> Result<LocalModel>,
+    start_model: impl Fn() -> Result<LocalModel>,
     output: &mut impl Write,
     messages: &Messages,
 ) -> Result<()> {
     let local_distro = Distro::current();
     let selected_distro = search.distro.map(Into::into).unwrap_or(local_distro);
-    let hits = index.search_with_model(
-        search.query.as_deref().unwrap_or_default(),
-        &SearchOptions {
-            path: search.path,
-            extension: search.extension,
-            file_kind: search.file_kind.map(Into::into),
-            category: search.category.map(Into::into),
-            distro: Some(selected_distro),
-            include_local_commands: selected_distro == local_distro,
-            limit: search.limit as usize,
-        },
-        start_model,
-    )?;
+    let options = SearchOptions {
+        path: search.path,
+        extension: search.extension,
+        file_kind: search.file_kind.map(Into::into),
+        category: search.category.map(Into::into),
+        distro: Some(selected_distro),
+        include_local_commands: selected_distro == local_distro,
+        limit: search.limit as usize,
+    };
+    let mut model = None;
+    let mut find = |query: &str| -> Result<_> {
+        let started = search.time.then(Instant::now);
+        let hits = index.search_with_cached_model(query, &options, &mut model, &start_model)?;
+        if let Some(started) = started {
+            let milliseconds = started.elapsed().as_secs_f64() * 1000.0;
+            eprintln!("semfind: {} {milliseconds:.2} ms", messages.search_time);
+        }
+        Ok(hits)
+    };
+    if search.stdin {
+        for (number, line) in io::stdin().lock().lines().enumerate() {
+            let context = || format!("stdin line {}", number + 1);
+            let line = line.with_context(context)?;
+            let query = line.trim();
+            if !query.is_empty() {
+                let hits = find(query).with_context(context)?;
+                print_json(output, &hits)?;
+                output.flush()?;
+            }
+        }
+        return Ok(());
+    }
+    let hits = find(search.query.as_deref().unwrap_or_default())?;
     if search.json {
         return print_json(output, &hits);
     }

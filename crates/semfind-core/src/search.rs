@@ -120,8 +120,23 @@ impl Index {
         options: &SearchOptions,
         start_model: impl FnOnce() -> Result<M>,
     ) -> Result<Vec<Hit>> {
+        self.search_with_cached_model(query, options, &mut None, start_model)
+    }
+
+    /// Reuse the encoder in the given slot, initializing it only when search needs embeddings.
+    pub fn search_with_cached_model<M: Embedder>(
+        &self,
+        query: &str,
+        options: &SearchOptions,
+        model: &mut Option<M>,
+        start_model: impl FnOnce() -> Result<M>,
+    ) -> Result<Vec<Hit>> {
         self.search_with_encoder(query, options, |conn, query| {
-            encode_query(conn, query, &mut start_model()?)
+            let model = match model {
+                Some(model) => model,
+                None => model.insert(start_model()?),
+            };
+            encode_query(conn, query, model)
         })
     }
 

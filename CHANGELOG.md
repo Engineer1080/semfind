@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.0
+
+- Add `semfind search --stdin` for programs and AI agents. Read one UTF-8 query per line, flush one JSON result array per query, and reuse the index and model worker across requests.
+- Add `--time` to report each search duration in milliseconds on stderr. Timing includes model startup when needed and ends before result formatting. JSON output stays on stdout.
+
 ## 0.1.9
 
 - Describe semfind as an offline Linux search CLI in the README, package metadata, and localized command help.

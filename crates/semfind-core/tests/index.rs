@@ -66,6 +66,39 @@ fn new_fixture() -> Result<(tempfile::TempDir, Index, PathBuf, FixtureModel)> {
 }
 
 #[test]
+fn cached_search_model_initializes_only_when_needed_and_is_reused() -> Result<()> {
+    let (_temp, mut index, root, mut indexing_model) = new_fixture()?;
+    let options = SearchOptions {
+        category: Some(Category::File),
+        ..Default::default()
+    };
+    let mut model = None;
+    let mut starts = 0;
+    let mut start_model = || {
+        starts += 1;
+        Ok(FixtureModel {
+            identity: "fixture-v1",
+            fail: false,
+            passages: 0,
+        })
+    };
+    assert!(
+        index
+            .search_with_cached_model("cold storage", &options, &mut model, &mut start_model)?
+            .is_empty()
+    );
+    assert!(model.is_none());
+    let path = fixture(&root, "notes.md", "Put the samples in the refrigerator.")?;
+    index.synchronize(Some(&root), &IndexOptions::default(), &mut indexing_model)?;
+    for query in ["cold storage", "refrigerator"] {
+        let hits = index.search_with_cached_model(query, &options, &mut model, &mut start_model)?;
+        assert_eq!(hits[0].path.as_ref(), Some(&path));
+    }
+    assert_eq!(starts, 1);
+    Ok(())
+}
+
+#[test]
 fn persistent_hybrid_search_filters_and_prioritizes_exact_literals() -> Result<()> {
     let (temp, mut index, root, mut model) = new_fixture()?;
     let cold = fixture(

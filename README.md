@@ -29,6 +29,23 @@ This query can return `df` with the example `df -h`. For file results, the JSON 
 
 With `--json`, search writes a JSON array to stdout, including `[]` for zero results. Diagnostics go to stderr. Exit codes are `0` for success (including zero hits), `1` for an operational error, and `2` for invalid CLI usage.
 
+Add `--time` to report the search duration in milliseconds on stderr. Measurement starts after the index is opened and includes model startup when needed, retrieval, and ranking. Result formatting is outside the measurement.
+
+```bash
+semfind "How do I show free disk space?" --category command --json --time
+```
+
+### Run multiple searches in one process
+
+```bash
+printf '%s\n' 'How do I show free disk space?' 'How do I find files by name?' |
+  semfind search --stdin --category command --limit 3 --time
+```
+
+`--stdin` reads one plain UTF-8 query per line and ignores blank lines. It writes and flushes one JSON result array for each query in input order, including `[]` for zero hits. Applications can send another query after reading the previous result while keeping stdin open. All queries share the same filters. The process opens the index once and reuses the model worker after the first query that requires embeddings.
+
+`--time` reports each query's duration on stderr. Closing stdin ends the session. If a query or input line fails, semfind reports its line number on stderr and exits with code `1`. Results already emitted remain valid.
+
 ## Install on Pop!_OS 24.04
 
 With this source directory open in a terminal, install Rust 1.93 or newer through [rustup](https://rustup.rs/) and run the following with the system Python 3.12. System package installation uses sudo. Build, indexing and search run as your regular user.

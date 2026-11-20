@@ -2,8 +2,12 @@ use anyhow::{Context, Result, ensure};
 use semfind_core::{Category, Distro, Hit};
 use std::{
     env, fs,
+    io::{BufRead, BufReader, Write},
     path::Path,
-    process::{Command, Output},
+    process::{Command, Output, Stdio},
+    sync::mpsc,
+    thread,
+    time::Duration,
 };
 
 fn cli(index: &Path) -> Command {
@@ -54,6 +58,117 @@ fn status_json_and_usage_exit_codes() -> Result<()> {
             .status
             .code(),
         Some(1)
+    );
+    Ok(())
+}
+
+#[test]
+fn search_time_is_opt_in_and_preserves_json() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let index = temp.path().join("index");
+    let untimed = cli(&index).args(["missing", "--json"]).output()?;
+    assert!(!String::from_utf8_lossy(&untimed.stderr).contains("Search time"));
+    let baseline = success(untimed)?;
+    for args in [
+        &["missing", "--json", "--time"][..],
+        &["search", "missing", "--json", "--time"],
+        &["--time", "search", "missing", "--json"],
+    ] {
+        let result = cli(&index).args(args).output()?;
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        let duration = stderr
+            .lines()
+            .find_map(|line| line.strip_prefix("semfind: Search time "))
+            .and_then(|value| value.strip_suffix(" ms"))
+            .with_context(|| format!("missing search duration in {stderr}"))?
+            .parse::<f64>()?;
+        assert!(duration.is_finite() && duration >= 0.0);
+        assert_eq!(success(result)?, baseline);
+    }
+    let german = cli(&index)
+        .env("LC_ALL", "de_DE.UTF-8")
+        .env_remove("LANGUAGE")
+        .args(["search", "missing", "--time"])
+        .output()?;
+    assert!(String::from_utf8_lossy(&german.stderr).contains("semfind: Suchzeit "));
+    assert!(success(german)?.is_empty());
+    Ok(())
+}
+
+#[test]
+fn stdin_search_flushes_each_result_before_eof() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let index = temp.path().join("index");
+    let mut child = cli(&index)
+        .arg("--python")
+        .arg(temp.path().join("missing-python"))
+        .args(["search", "--stdin", "--time"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let mut input = child.stdin.take().context("missing stdin pipe")?;
+    let stdout = child.stdout.take().context("missing stdout pipe")?;
+    let (send, receive) = mpsc::channel();
+    let reader = thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            if send.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let exchange = (|| -> Result<_> {
+        writeln!(input, "first query")?;
+        let first = receive.recv_timeout(Duration::from_secs(5))??;
+        // Whitespace-only lines produce no records. EOF completes the unterminated query.
+        input.write_all(b"\n \t\r\nsecond query")?;
+        drop(input);
+        let second = receive.recv_timeout(Duration::from_secs(5))??;
+        Ok([first, second])
+    })();
+    let output = child.wait_with_output()?;
+    reader.join().expect("stdout reader panicked");
+    assert!(receive.try_recv().is_err());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr)
+            .matches("semfind: Search time ")
+            .count(),
+        2
+    );
+    success(output)?;
+    assert_eq!(exchange?, ["[]", "[]"]);
+    Ok(())
+}
+
+#[test]
+fn stdin_search_reports_invalid_input_and_keeps_previous_results() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let index = temp.path().join("index");
+    for args in [
+        &["search", "--stdin", "query"][..],
+        &["--stdin", "search", "query"],
+        &["--stdin", "status"],
+    ] {
+        assert_eq!(cli(&index).args(args).output()?.status.code(), Some(2));
+    }
+    let mut child = cli(&index)
+        .args(["--stdin", "--json"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    child
+        .stdin
+        .take()
+        .context("missing stdin pipe")?
+        .write_all(b"first\ninvalid\0query\nlast\n")?;
+    let output = child.wait_with_output()?;
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stdout, b"[]\n");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("stdin line 2") && stderr.contains("NUL"),
+        "{stderr}"
     );
     Ok(())
 }
