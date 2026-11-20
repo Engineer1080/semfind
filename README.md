@@ -13,6 +13,7 @@ Linux filename search helps when you know what a file is called. Full-text searc
 - Search across UTF-8 text, Markdown, logs, CSV, reStructuredText, and PDFs with a text layer.
 - Local Granite Embedding 97M Multilingual R2 embeddings, SQLite FTS5, and hybrid ranking with one result per indexed source.
 - Filters for folder, file extension, file kind (text, image, video), and result category. JSON for scripting.
+- With Florence-2 set up, `semfind init` makes JPEG, PNG, and WebP images searchable by subject alongside documents.
 - Incremental rescans that recalculate embeddings only for changed content. Saved directory exclusions and manual index removal.
 
 The CLI works independently of the desktop environment. Pop!_OS 24.04 is one of the [tested environments](docs/verification.md). Desktop search and launcher integrations for KDE Plasma, GNOME, COSMIC, and other Linux desktops are planned. See the [roadmap](docs/roadmap.md) and [COSMIC research](integrations/cosmic/README.md).
@@ -207,7 +208,7 @@ semfind --kind video --path "$HOME/Videos"
 semfind "Datenschutz" --kind text --type pdf
 ```
 
-`--kind` groups file extensions and can list indexed files without a query. Image and video searches use filenames and paths. Listing indexed files or filtering a search to image and video formats works without loading the model. Rescan your indexed folders to include images and videos.
+`--kind` groups file extensions and can list indexed files without a query. Images are searchable by filename and path, and captioned images are also searchable by subject. Videos are searchable by filename and path. Listing files and searching filenames in an index with no matching embeddings work without loading the model.
 
 ```bash
 semfind index "$HOME/Documents" --exclude Private --exclude Archive/taxes
@@ -219,6 +220,25 @@ semfind unindex "$HOME/Documents"
 Passing exclusions replaces the saved list for that root. Use `--clear-excludes` to clear it. Quote multiword queries. Use `semfind search "status"` to search for a semfind subcommand name.
 
 Local data defaults to `${XDG_DATA_HOME:-$HOME/.local/share}/semfind`. Set `SEMFIND_MODEL_DIR` and `SEMFIND_INDEX_DIR` to use other locations. The index directory must be private on Linux.
+
+### Search images by subject
+
+Once Florence-2 is set up locally, `semfind init` automatically generates English descriptions of supported JPEG, PNG, and WebP files in your home directory. Semfind indexes the captions as text alongside document passages. The same search can return both, while `--kind image` limits it to pictures. Semfind includes the generated description in the result snippet.
+
+From the repository root, add the optional dependencies to the Python environment selected during setup. The [Florence-2 Base FT checkpoint](https://huggingface.co/florence-community/Florence-2-base-ft) download is about 470 MB.
+
+```bash
+"$SEMFIND_PYTHON" -m pip install 'torch==2.14.1' 'torchvision==0.29.1' --index-url https://download.pytorch.org/whl/cpu
+"$SEMFIND_PYTHON" -m pip install 'transformers==5.23.0' 'Pillow==13.0.0'
+"$SEMFIND_PYTHON" scripts/download_model.py --model florence-2
+semfind init
+semfind "Katze auf dem Sofa" --json
+semfind "Katze auf dem Sofa" --kind image --json
+```
+
+Caption generation runs locally on the CPU. The first run can take longer for large photo collections. Subsequent scans only generate captions for new or changed images, or when the caption model changes. Searches use the configured text embedding model. The download is part of the separate setup above. If Florence-2 is unavailable during `init`, Semfind keeps the captions it already has and indexes new images by filename and path. Use `semfind init --no-caption-images` to skip captioning for one run.
+
+Use `semfind index ROOT --caption-images` to explicitly caption images in a separate indexed root. Use `SEMFIND_CAPTION_MODEL_DIR` or `--caption-model-dir` for another local checkpoint directory. Deleting an image or unindexing its root removes its caption. Unreadable image contents fall back to filename and path search when the file itself remains accessible. Caption extraction limits images to 16 MiB and 40 million pixels.
 
 ## Architecture and limits
 

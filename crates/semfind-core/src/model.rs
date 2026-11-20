@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail, ensure};
 use std::{
+    ffi::OsStr,
     io::{BufRead, BufReader, BufWriter, Write},
     path::Path,
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
@@ -42,9 +43,7 @@ pub enum ExecutionDevice {
 
 /// ONNX encoder through a local Python worker.
 pub struct LocalModel {
-    child: Child,
-    input: BufWriter<ChildStdin>,
-    output: BufReader<ChildStdout>,
+    worker: PythonWorker,
     identity: String,
     minimum_similarity: Option<f32>,
 }
@@ -69,10 +68,34 @@ impl LocalModel {
             ExecutionDevice::Cuda => "cuda",
             ExecutionDevice::Migraphx => "migraphx",
         };
+        let mut worker = PythonWorker::start(
+            python,
+            include_str!("worker.py"),
+            &[directory.as_os_str(), OsStr::new(device)],
+        )?;
+        let ready: WorkerReady = worker
+            .receive()
+            .context("load the local model (see README setup)")?;
+        ensure!(!ready.identity.is_empty(), "empty model identity");
+        Ok(Self {
+            worker,
+            identity: ready.identity,
+            minimum_similarity: ready.minimum_similarity,
+        })
+    }
+}
+
+pub(crate) struct PythonWorker {
+    child: Child,
+    pub input: BufWriter<ChildStdin>,
+    output: BufReader<ChildStdout>,
+}
+
+impl PythonWorker {
+    pub fn start(python: &Path, script: &str, args: &[&OsStr]) -> Result<Self> {
         let mut child = Command::new(python)
-            .args(["-I", "-u", "-c", include_str!("worker.py")])
-            .arg(directory)
-            .arg(device)
+            .args(["-I", "-u", "-c", script])
+            .args(args)
             .env("RAYON_NUM_THREADS", "1")
             .env("OPENBLAS_NUM_THREADS", "1")
             .env("OMP_NUM_THREADS", "1")
@@ -83,28 +106,19 @@ impl LocalModel {
             .with_context(|| format!("start Python interpreter {}", python.display()))?;
         let input = BufWriter::new(child.stdin.take().expect("piped stdin"));
         let output = BufReader::new(child.stdout.take().expect("piped stdout"));
-        let mut model = Self {
+        Ok(Self {
             child,
             input,
             output,
-            identity: String::new(),
-            minimum_similarity: None,
-        };
-        let ready: WorkerReady = model
-            .receive()
-            .context("load the local model (see README setup)")?;
-        ensure!(!ready.identity.is_empty(), "empty model identity");
-        model.identity = ready.identity;
-        model.minimum_similarity = ready.minimum_similarity;
-        Ok(model)
+        })
     }
 
-    fn receive<T: serde::de::DeserializeOwned>(&mut self) -> Result<T> {
+    pub fn receive<T: serde::de::DeserializeOwned>(&mut self) -> Result<T> {
         let mut line = String::new();
         if self.output.read_line(&mut line)? == 0 {
-            bail!("embedding worker closed its output");
+            bail!("model worker closed its output");
         }
-        serde_json::from_str(&line).context("decode embedding worker response")
+        serde_json::from_str(&line).context("decode model worker response")
     }
 }
 
@@ -122,14 +136,14 @@ impl Embedder for LocalModel {
             InputKind::Query => "query: ",
             InputKind::Passage => "passage: ",
         };
-        serde_json::to_writer(&mut self.input, &(prefix, texts))?;
-        self.input.write_all(b"\n")?;
-        self.input.flush()?;
-        self.receive()
+        serde_json::to_writer(&mut self.worker.input, &(prefix, texts))?;
+        self.worker.input.write_all(b"\n")?;
+        self.worker.input.flush()?;
+        self.worker.receive()
     }
 }
 
-impl Drop for LocalModel {
+impl Drop for PythonWorker {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();

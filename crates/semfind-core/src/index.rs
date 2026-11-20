@@ -3,6 +3,7 @@ use crate::{
     catalog::SETTINGS,
     commands::{COMMANDS, Distro},
     files::{self, FileKind, HitLocation, Passage},
+    images::{self, ImageCaptioner},
     manuals,
     model::{Embedder, InputKind, normalized},
     translations::catalog_texts,
@@ -166,7 +167,7 @@ impl Index {
         options: &IndexOptions,
         model: &mut impl Embedder,
     ) -> Result<IndexReport> {
-        self.synchronize_sources(root, options, false, None, model)
+        self.synchronize_sources(root, options, false, None, model, None)
     }
 
     /// Refresh the installed command catalog alongside the ordinary index sources.
@@ -181,7 +182,23 @@ impl Index {
             cfg!(target_os = "linux"),
             "index --manpages is supported on Linux"
         );
-        self.synchronize_sources(root, options, false, Some(distro), model)
+        self.synchronize_sources(root, options, false, Some(distro), model, None)
+    }
+
+    /// Synchronize a selected folder and caption its supported images locally.
+    pub fn synchronize_with_image_captions(
+        &mut self,
+        root: &Path,
+        options: &IndexOptions,
+        manpages: Option<Distro>,
+        model: &mut impl Embedder,
+        captioner: &mut dyn ImageCaptioner,
+    ) -> Result<IndexReport> {
+        ensure!(
+            manpages.is_none() || cfg!(target_os = "linux"),
+            "index --manpages is supported on Linux"
+        );
+        self.synchronize_sources(Some(root), options, false, manpages, model, Some(captioner))
     }
 
     /// Synchronize the home directory, installed desktop applications, local commands and catalogs.
@@ -191,9 +208,28 @@ impl Index {
         options: &IndexOptions,
         model: &mut impl Embedder,
     ) -> Result<IndexReport> {
+        self.initialize_home_with_image_captions(home, options, model, None)
+    }
+
+    /// Initialize the home index, optionally generating captions for supported images.
+    /// If caption inference fails, keep existing captions and finish the scan without new ones.
+    pub fn initialize_home_with_image_captions(
+        &mut self,
+        home: &Path,
+        options: &IndexOptions,
+        model: &mut impl Embedder,
+        captioner: Option<&mut dyn ImageCaptioner>,
+    ) -> Result<IndexReport> {
         ensure!(cfg!(target_os = "linux"), "init is supported on Linux");
         ensure!(home.is_absolute(), "HOME must be an absolute path");
-        self.synchronize_sources(Some(home), options, true, Some(Distro::current()), model)
+        self.synchronize_sources(
+            Some(home),
+            options,
+            true,
+            Some(Distro::current()),
+            model,
+            captioner,
+        )
     }
 
     fn synchronize_sources(
@@ -203,7 +239,14 @@ impl Index {
         initializing: bool,
         local_command_distro: Option<Distro>,
         model: &mut impl Embedder,
+        captions: Option<&mut dyn ImageCaptioner>,
     ) -> Result<IndexReport> {
+        ensure!(
+            captions
+                .as_ref()
+                .is_none_or(|captioner| !captioner.identity().is_empty()),
+            "caption model identity is empty"
+        );
         ensure!(
             root.is_some() || options.exclude.is_none(),
             "exclusions require a file root"
@@ -260,7 +303,11 @@ impl Index {
                 )?;
                 serde_json::from_str(&encoded)?
             };
-            synchronize_files(&tx, &root, name, &exclusions, model, &mut report)?;
+            let captions = captions.map(|captioner| CaptionScan {
+                captioner,
+                required: !initializing,
+            });
+            synchronize_files(&tx, &root, name, &exclusions, model, captions, &mut report)?;
             if initializing {
                 let applications = applications::discover(&root)?;
                 synchronize_applications(&tx, &applications, model, &mut report)?;
@@ -701,12 +748,18 @@ fn remove_missing_sources(
     Ok(())
 }
 
+struct CaptionScan<'a> {
+    captioner: &'a mut dyn ImageCaptioner,
+    required: bool,
+}
+
 fn synchronize_files(
     tx: &Transaction<'_>,
     root: &Path,
     root_name: &str,
     exclusions: &[PathBuf],
     model: &mut impl Embedder,
+    mut captions: Option<CaptionScan<'_>>,
     report: &mut IndexReport,
 ) -> Result<()> {
     tx.execute_batch(
@@ -753,40 +806,94 @@ fn synchronize_files(
             .file_name()
             .to_str()
             .context("file names must be valid UTF-8")?;
-        let bytes = match files::open_file(root, path, kind).and_then(|file| {
-            if kind == FileKind::Text {
-                files::read(file).map(Some)
-            } else {
-                Ok(None)
-            }
-        }) {
-            Ok(bytes) => bytes,
+        let file = match files::open_file(root, path, kind) {
+            Ok(file) => file,
             Err(error) => {
                 warn(report, path, &error);
                 continue;
             }
         };
-        let digest = match &bytes {
-            Some(bytes) => Sha256::new()
+        let caption_scan = captions
+            .as_mut()
+            .filter(|_| images::supports_caption(&extension));
+        let bytes = if kind == FileKind::Text || caption_scan.is_some() {
+            match files::read(file) {
+                Ok(bytes) => Some(bytes),
+                Err(error) => {
+                    warn(report, path, &error);
+                    if kind == FileKind::Text {
+                        continue;
+                    }
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let mut digest = match (&bytes, &caption_scan) {
+            (Some(bytes), Some(scan)) => Sha256::new()
+                .chain_update(b"image-caption-v1\0")
+                .chain_update(scan.captioner.identity())
+                .chain_update(b"\0")
+                .chain_update(bytes)
+                .finalize(),
+            (Some(bytes), None) => Sha256::new()
                 .chain_update(b"extract-v2\0")
                 .chain_update(bytes)
                 .finalize(),
-            None => Sha256::digest(b"file-name-v1"),
+            (None, _) => Sha256::digest(b"file-name-v1"),
         };
+        // A filename-only scan must preserve previously indexed captions.
+        let preserve_caption = kind == FileKind::Image && caption_scan.is_none();
         let stored = source_state(tx, key)?;
-        let id = if let Some((id, _)) = stored.filter(|(_, saved)| saved == digest.as_slice()) {
+        let id = if let Some((id, _)) = stored
+            .as_ref()
+            .filter(|(_, saved)| preserve_caption || saved == digest.as_slice())
+        {
             report.unchanged += 1;
-            id
+            *id
         } else {
-            let text = match bytes
-                .map(|bytes| files::extract(&extension, bytes))
-                .transpose()
-            {
-                Ok(text) => text,
-                Err(error) => {
-                    warn(report, path, &error);
-                    continue;
-                }
+            let text = match (bytes, caption_scan) {
+                (Some(bytes), Some(scan)) => match scan.captioner.caption(&bytes) {
+                    Ok(caption) => {
+                        let caption = caption.filter(|text| !text.trim().is_empty());
+                        if caption.is_none() {
+                            warn(
+                                report,
+                                path,
+                                &anyhow::anyhow!("image could not be captioned; indexed filename"),
+                            );
+                        }
+                        caption
+                    }
+                    Err(error) if scan.required => {
+                        return Err(error).with_context(|| format!("caption {}", path.display()));
+                    }
+                    Err(error) => {
+                        warn(
+                            report,
+                            path,
+                            &error
+                                .context("Florence-2 unavailable. Continuing without new captions"),
+                        );
+                        captions = None;
+                        if let Some((id, _)) = stored {
+                            report.unchanged += 1;
+                            tx.execute("INSERT INTO seen VALUES (?1)", [id])?;
+                            continue;
+                        }
+                        digest = Sha256::digest(b"file-name-v1");
+                        None
+                    }
+                },
+                (Some(bytes), None) => match files::extract(&extension, bytes) {
+                    Ok(text) => Some(text),
+                    Err(error) => {
+                        warn(report, path, &error);
+                        continue;
+                    }
+                },
+                (None, _) => None,
             };
             let id = write_source(
                 tx,
@@ -801,8 +908,14 @@ fn synchronize_files(
                     distro: None,
                     example: None,
                 },
-                text.as_deref()
-                    .map(|text| files::file_passages(text, extension == "pdf")),
+                text.as_deref().map(|text| {
+                    files::file_passages(text, extension == "pdf").map(|mut passage| {
+                        if kind == FileKind::Image {
+                            passage.location = None;
+                        }
+                        passage
+                    })
+                }),
                 &digest,
                 model,
             )?;

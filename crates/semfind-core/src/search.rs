@@ -308,7 +308,7 @@ impl Index {
         let file_kind = options
             .file_kind
             .or_else(|| extension.as_deref().and_then(FileKind::from_extension));
-        if !matches!(file_kind, Some(FileKind::Image | FileKind::Video)) {
+        if file_kind != Some(FileKind::Video) {
             let mut encode = Some(encode);
             let mut query_embedding = None;
             let mut statement =

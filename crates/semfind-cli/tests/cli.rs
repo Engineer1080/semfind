@@ -48,6 +48,14 @@ fn status_json_and_usage_exit_codes() -> Result<()> {
     );
     assert_eq!(cli(&index).output()?.status.code(), Some(2));
     assert_eq!(
+        cli(&index)
+            .args(["index", "--caption-images"])
+            .output()?
+            .status
+            .code(),
+        Some(2)
+    );
+    assert_eq!(
         cli(&index).args(["search"]).output()?.status.code(),
         Some(2)
     );
@@ -438,9 +446,11 @@ fn real_model_init_indexes_home_desktop_applications_and_manuals() -> Result<()>
     let system_apps = system_data.join("applications");
     let manual_root = temp.path().join("man");
     let manual = manual_root.join("man1").join("init-example.1");
+    let caption_model_dir = temp.path().join("incomplete-caption-model");
     fs::create_dir_all(&user_apps)?;
     fs::create_dir_all(&system_apps)?;
     fs::create_dir_all(manual_root.join("man1"))?;
+    fs::create_dir(&caption_model_dir)?;
     fs::write(
         &manual,
         ".TH INIT-EXAMPLE 1\n.SH NAME\ninit-example \\- examine a sparse file\n.SH SYNOPSIS\n.B init-example\nFILE\n",
@@ -475,6 +485,7 @@ fn real_model_init_indexes_home_desktop_applications_and_manuals() -> Result<()>
             .env("HOME", &home)
             .env("XDG_DATA_DIRS", &system_data)
             .env("XDG_CURRENT_DESKTOP", "COSMIC")
+            .env("SEMFIND_CAPTION_MODEL_DIR", &caption_model_dir)
             .env("MANPATH", &manual_root);
         command
     };
@@ -491,7 +502,9 @@ fn real_model_init_indexes_home_desktop_applications_and_manuals() -> Result<()>
     let status: serde_json::Value = serde_json::from_slice(&success(after_failure)?)?;
     assert_eq!(status["files"], 0, "{status}");
 
-    run(&["init", "--exclude", "Private"])?;
+    let first_init = command().args(["init", "--exclude", "Private"]).output()?;
+    assert!(String::from_utf8_lossy(&first_init.stderr).contains("Florence-2 unavailable"));
+    success(first_init)?;
     let status_output = command().args(["status", "--json"]).output()?;
     assert!(!has_init_hint(&status_output));
     let status: serde_json::Value = serde_json::from_slice(&success(status_output)?)?;
@@ -537,7 +550,9 @@ fn real_model_init_indexes_home_desktop_applications_and_manuals() -> Result<()>
     fs::remove_file(user_apps.join("viewer.desktop"))?;
     fs::remove_file(system_apps.join("viewer.desktop"))?;
     fs::remove_file(manual)?;
-    let report = String::from_utf8(run(&["init"])?)?;
+    let next_init = command().args(["init", "--no-caption-images"]).output()?;
+    assert!(!String::from_utf8_lossy(&next_init.stderr).contains("Florence-2"));
+    let report = String::from_utf8(success(next_init)?)?;
     assert!(
         report.contains(&format!(
             "Written: 0 | Unchanged: {} | Removed: 2",

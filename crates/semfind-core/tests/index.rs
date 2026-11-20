@@ -1,7 +1,8 @@
 use anyhow::{Result, bail};
 use rusqlite::{Connection, TransactionBehavior};
 use semfind_core::{
-    Category, Embedder, FileKind, HitLocation, Index, IndexOptions, InputKind, SearchOptions,
+    Category, Embedder, FileKind, HitLocation, ImageCaptioner, Index, IndexOptions, InputKind,
+    SearchOptions,
 };
 use sha2::{Digest, Sha256};
 use std::{
@@ -13,6 +14,27 @@ struct FixtureModel {
     identity: &'static str,
     fail: bool,
     passages: usize,
+}
+
+struct FixtureCaptioner {
+    revision: &'static str,
+    calls: usize,
+}
+
+impl ImageCaptioner for FixtureCaptioner {
+    fn identity(&self) -> &str {
+        self.revision
+    }
+
+    fn caption(&mut self, image: &[u8]) -> Result<Option<String>> {
+        self.calls += 1;
+        match image {
+            b"kitchen" => Ok(Some("A refrigerator next to a counter.".into())),
+            b"outdoors" => Ok(Some("A garden bench outside.".into())),
+            b"broken-worker" => bail!("fixture caption worker failed"),
+            _ => Ok(None),
+        }
+    }
 }
 
 impl Embedder for FixtureModel {
@@ -83,6 +105,106 @@ fn new_fixture() -> Result<(tempfile::TempDir, Index, PathBuf, FixtureModel)> {
         passages: 0,
     };
     Ok((temp, index, root, model))
+}
+
+#[test]
+fn image_captions_share_document_search_and_refresh_incrementally() -> Result<()> {
+    let (_temp, mut index, root, mut model) = new_fixture()?;
+    let picture = fixture(&root, "0001.jpg", "kitchen")?;
+    fixture(&root, "0002.png", "outdoors")?;
+    fixture(&root, "0003.webp", "unreadable")?;
+    let document = fixture(&root, "notes.md", "Cold storage keeps samples fresh.")?;
+    let scan = IndexOptions::default();
+    let scoped = SearchOptions {
+        path: Some(root.clone()),
+        ..Default::default()
+    };
+    let image_only = SearchOptions {
+        file_kind: Some(FileKind::Image),
+        path: Some(root.clone()),
+        ..Default::default()
+    };
+    index.synchronize(Some(&root), &scan, &mut model)?;
+    assert!(
+        index
+            .search_with_model::<FixtureModel>("cold storage", &image_only, || {
+                bail!("filename-only images should not need embeddings")
+            })?
+            .is_empty()
+    );
+    let mut captioner = FixtureCaptioner {
+        revision: "fixture-caption-v1",
+        calls: 0,
+    };
+    let report =
+        index.synchronize_with_image_captions(&root, &scan, None, &mut model, &mut captioner)?;
+    assert_eq!((report.written, report.skipped, captioner.calls), (3, 1, 3));
+    let hits = index.search("cold storage", &scoped, &mut model)?;
+    assert_eq!(hits.len(), 2);
+    assert!(hits.iter().any(|hit| hit.path.as_ref() == Some(&document)));
+    let image = hits
+        .iter()
+        .find(|hit| hit.path.as_ref() == Some(&picture))
+        .unwrap();
+    assert!(image.snippet.contains("refrigerator") && image.location.is_none());
+    assert_eq!(
+        index.search("cold storage", &image_only, &mut model)?[0]
+            .path
+            .as_ref(),
+        Some(&picture)
+    );
+    assert_eq!(
+        index.search("0003.webp", &image_only, &mut model)?[0].title,
+        "0003.webp"
+    );
+
+    assert_eq!(
+        index.synchronize(Some(&root), &scan, &mut model)?.written,
+        0
+    );
+    assert_eq!(
+        index
+            .synchronize_with_image_captions(&root, &scan, None, &mut model, &mut captioner)?
+            .written,
+        0
+    );
+    assert_eq!(captioner.calls, 3);
+
+    fs::write(&picture, "broken-worker")?;
+    assert!(
+        index
+            .synchronize_with_image_captions(&root, &scan, None, &mut model, &mut captioner)
+            .is_err()
+    );
+    assert_eq!(
+        index.search("cold storage", &image_only, &mut model)?[0]
+            .path
+            .as_ref(),
+        Some(&picture)
+    );
+    fs::write(&picture, "outdoors")?;
+    assert_eq!(
+        index
+            .synchronize_with_image_captions(&root, &scan, None, &mut model, &mut captioner)?
+            .written,
+        1
+    );
+    assert_eq!(captioner.calls, 5);
+    assert!(
+        index
+            .search("cold storage", &image_only, &mut model)?
+            .is_empty()
+    );
+
+    captioner.revision = "fixture-caption-v2";
+    assert_eq!(
+        index
+            .synchronize_with_image_captions(&root, &scan, None, &mut model, &mut captioner)?
+            .written,
+        3
+    );
+    assert_eq!(captioner.calls, 8);
+    Ok(())
 }
 
 #[test]

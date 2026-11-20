@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, ensure};
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use semfind_core::{
-    Category, Distro, ExecutionDevice, FileKind, HitLocation, Index, IndexOptions, IndexReport,
-    Language, LocalModel, SearchOptions,
+    Category, Distro, ExecutionDevice, FileKind, FlorenceCaptioner, HitLocation, Index,
+    IndexOptions, IndexReport, Language, LocalModel, SearchOptions,
 };
 mod distro;
 mod ui;
@@ -29,6 +29,9 @@ struct Cli {
         conflicts_with = "model"
     )]
     model_dir: Option<PathBuf>,
+    /// Directory containing the local Florence-2 checkpoint.
+    #[arg(long, env = "SEMFIND_CAPTION_MODEL_DIR", global = true)]
+    caption_model_dir: Option<PathBuf>,
     /// Select an embedding model installed by scripts/download_model.py.
     #[arg(long, env = "SEMFIND_MODEL", value_enum, global = true)]
     model: Option<ModelChoice>,
@@ -88,6 +91,9 @@ enum Command {
         /// Remove the saved exclusions for HOME.
         #[arg(long, conflicts_with = "exclude")]
         clear_excludes: bool,
+        /// Skip Florence-2 image captioning for this scan.
+        #[arg(long)]
+        no_caption_images: bool,
     },
     /// Synchronize a directory and the built-in catalogs. Omit the root for catalogs only.
     Index {
@@ -95,6 +101,9 @@ enum Command {
         /// Include local manual pages and executable names from PATH.
         #[arg(long)]
         manpages: bool,
+        /// Describe supported images in the selected directory with Florence-2.
+        #[arg(long, requires = "root")]
+        caption_images: bool,
         /// Exclude a directory or file by name or by a path relative to the root.
         #[arg(long, requires = "root")]
         exclude: Vec<PathBuf>,
@@ -256,12 +265,16 @@ fn localized_help(messages: &Messages) -> clap::Command {
             sub.about(messages.init)
                 .mut_arg("exclude", |arg| arg.help(messages.exclude))
                 .mut_arg("clear_excludes", |arg| arg.help(messages.clear_excludes))
+                .mut_arg("no_caption_images", |arg| {
+                    arg.help(messages.no_caption_images)
+                })
         })
         .mut_subcommand("index", |sub| {
             sub.about(messages.index)
                 .mut_arg("exclude", |arg| arg.help(messages.exclude))
                 .mut_arg("clear_excludes", |arg| arg.help(messages.clear_excludes))
                 .mut_arg("manpages", |arg| arg.help(messages.manpages))
+                .mut_arg("caption_images", |arg| arg.help(messages.caption_images))
         })
         .mut_subcommand("status", |sub| {
             sub.about(messages.status)
@@ -370,6 +383,12 @@ fn run(cli: Cli, output: &mut impl Write, messages: &Messages) -> Result<()> {
         };
         LocalModel::start_on(&cli.python, &directory, device)
     };
+    let caption_directory = || -> Result<PathBuf> {
+        match &cli.caption_model_dir {
+            Some(path) => Ok(path.clone()),
+            None => Ok(data_dir(messages)?.join("model/florence-2-base-ft")),
+        }
+    };
     match cli.command {
         Some(Command::Status { json }) => {
             let status = index.status()?;
@@ -405,20 +424,36 @@ fn run(cli: Cli, output: &mut impl Write, messages: &Messages) -> Result<()> {
         Some(Command::Init {
             exclude,
             clear_excludes,
+            no_caption_images,
         }) => {
             let home = env::var_os("HOME").context(messages.home_required)?;
-            let report = index.initialize_home(
+            let directory = (!no_caption_images).then(caption_directory).transpose()?;
+            let mut captioner = match directory.as_deref() {
+                Some(path) => match open_optional_captioner(&cli.python, path) {
+                    Ok(captioner) => captioner,
+                    Err(error) => {
+                        eprintln!(
+                            "semfind: Florence-2 unavailable. Continuing without new captions. {error:#}"
+                        );
+                        None
+                    }
+                },
+                None => None,
+            };
+            let report = index.initialize_home_with_image_captions(
                 Path::new(&home),
                 &IndexOptions {
                     exclude: (clear_excludes || !exclude.is_empty()).then_some(exclude),
                 },
                 &mut start_model()?,
+                captioner.as_mut().map(|model| model as &mut _),
             )?;
             print_index_report(output, &report, messages)?;
         }
         Some(Command::Index {
             root,
             manpages,
+            caption_images,
             exclude,
             clear_excludes,
         }) => {
@@ -426,7 +461,17 @@ fn run(cli: Cli, output: &mut impl Write, messages: &Messages) -> Result<()> {
                 exclude: (clear_excludes || !exclude.is_empty()).then_some(exclude),
             };
             let mut model = start_model()?;
-            let report = if manpages {
+            let report = if caption_images {
+                let directory = caption_directory()?;
+                let mut captioner = FlorenceCaptioner::new(&cli.python, &directory)?;
+                index.synchronize_with_image_captions(
+                    root.as_deref().expect("--caption-images requires a root"),
+                    &options,
+                    manpages.then(Distro::current),
+                    &mut model,
+                    &mut captioner,
+                )?
+            } else if manpages {
                 index.synchronize_with_manpages(
                     root.as_deref(),
                     &options,
@@ -445,6 +490,20 @@ fn run(cli: Cli, output: &mut impl Write, messages: &Messages) -> Result<()> {
         None => run_search(&index, cli.search, start_model, output, messages)?,
     }
     Ok(())
+}
+
+fn open_optional_captioner<'a>(
+    python: &'a Path,
+    directory: &'a Path,
+) -> Result<Option<FlorenceCaptioner<'a>>> {
+    if directory
+        .try_exists()
+        .with_context(|| format!("check {}", directory.display()))?
+    {
+        Ok(Some(FlorenceCaptioner::new(python, directory)?))
+    } else {
+        Ok(None)
+    }
 }
 
 fn print_index_report(

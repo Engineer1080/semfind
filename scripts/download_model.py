@@ -46,6 +46,21 @@ GRANITE_311_FILES = {
         "0087c868b33bad550a78a08d19798cfd7f713cde4f020803b8f51f405503e15f",
     ),
 }
+FLORENCE_REVISION = "0b03b6f15a4a211370fb204aee4e7dd48887ea37"
+FLORENCE_URL = f"https://huggingface.co/florence-community/Florence-2-base-ft/resolve/{FLORENCE_REVISION}"
+FLORENCE_SHA256 = {
+    "added_tokens.json": "1d75deda84dfa81fb6c09301f3fed00f9695059568bbb1403a6bf299cd84fc37",
+    "config.json": "2a4dfe9885d183da121f239ada734bd700ee6908b650a7a25ab32eb104fe1d7a",
+    "generation_config.json": "0251459c49cc358ac033b5d4b8569e61ac22bde5d76be404b97a44cfb33fb12e",
+    "merges.txt": "1ce1664773c50f3e0cc8842619a93edc4624525b728b188a9e0be33b7726adc5",
+    "model.safetensors": "ab06dea66b16d5e54513256d64854be2194443452fd0d84353b40a278bf87d42",
+    "preprocessor_config.json": "1396ec5a0a7adfe1c04fb777b09e8ba753be6dbb5868212ab3c3ef39d91fe031",
+    "processor_config.json": "cd0e3bf41a39b1276503fbd273bc03b9afc70d7a15ea681a92a1b4b77f858ee6",
+    "special_tokens_map.json": "72ff172dc769bc1551b1b4211628ce3271643bc60379e4da45d85a9be9332c39",
+    "tokenizer.json": "3ad7001f773409abe6bba33eac92662611a73d72f459bda2f00d2a221dd31ce4",
+    "tokenizer_config.json": "cb5f80bd9afa767bb1bb798ee5f0a79eae45239b8e72506166b4218175a16723",
+    "vocab.json": "ed19656ea1707df69134c4af35c8ceda2cc9860bf2c3495026153a133670ab5e",
+}
 
 
 EXTRA_MODELS = {
@@ -53,6 +68,9 @@ EXTRA_MODELS = {
         name: (name, digest) for name, digest in E5_LARGE_SHA256.items()
     }),
     "granite-311m": (GRANITE_311_URL, "granite-311m-r2", GRANITE_311_FILES),
+    "florence-2": (FLORENCE_URL, "florence-2-base-ft", {
+        name: (name, digest) for name, digest in FLORENCE_SHA256.items()
+    }),
 }
 
 
@@ -87,7 +105,7 @@ def main():
     if not default_data.is_absolute():
         default_data = Path.home() / ".local" / "share"
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--directory", type=Path, default=os.getenv("SEMFIND_MODEL_DIR"))
+    parser.add_argument("--directory", type=Path)
     models = ("granite-97m", "e5-small", *EXTRA_MODELS)
     parser.add_argument("--model", choices=models)
     parser.add_argument("--variant", choices=E5_WEIGHTS, default="fp32")
@@ -108,7 +126,8 @@ def main():
     else:
         base, subdirectory, artifacts = EXTRA_MODELS[model]
         default_directory /= subdirectory
-    directory = args.directory if args.directory is not None else default_directory
+    variable = "SEMFIND_CAPTION_MODEL_DIR" if model == "florence-2" else "SEMFIND_MODEL_DIR"
+    directory = args.directory or Path(os.getenv(variable) or default_directory)
     directory.mkdir(parents=True, exist_ok=True)
     for filename, (upstream, digest) in artifacts.items():
         download(base, upstream, directory / filename, digest)

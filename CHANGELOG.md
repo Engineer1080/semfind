@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2
+
+- Search JPEG, PNG, and WebP images by subject using locally generated Florence-2 captions. Queries can return both images and documents. Use `--kind image` to show only images.
+- `semfind init` uses Florence-2 automatically after local setup. It reuses existing captions and falls back to filename and path when the model is unavailable. Use `--no-caption-images` to skip caption generation for one run, or `semfind index ROOT --caption-images` to caption images in a selected directory.
+- Add an optional Florence-2 Base FT download with a fixed model revision and SHA-256 verification. Caption generation and search run offline after setup.
+
 ## 0.2.1
 
 - Show one-based line ranges for text passages and physical page numbers for PDF passages. JSON and streaming results include an optional `location` field.

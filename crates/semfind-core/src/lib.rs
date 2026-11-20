@@ -3,6 +3,7 @@ mod applications;
 mod catalog;
 mod commands;
 mod files;
+mod images;
 mod index;
 mod locale;
 mod manuals;
@@ -12,6 +13,7 @@ mod translations;
 
 pub use commands::Distro;
 pub use files::{FileKind, HitLocation};
+pub use images::{FlorenceCaptioner, ImageCaptioner};
 pub use index::{Index, IndexOptions, IndexReport, Status};
 pub use locale::Language;
 pub use model::{Embedder, ExecutionDevice, InputKind, LocalModel};
