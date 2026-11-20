@@ -146,6 +146,7 @@ The provider list should include `MIGraphXExecutionProvider`. The explicit `--de
 ## Try it
 
 On Linux, run `semfind init` after setup to index your home directory, desktop applications, and local command manuals. The first scan can take time on a large home directory or a system with many manuals.
+In an interactive terminal, `init` shows the current phase, elapsed time, and the number of supported files found so far. The final summary reports how many entries were written, unchanged, removed, or skipped.
 Status, indexing, and search commands print a setup reminder on stderr until `init` succeeds for the selected index.
 
 ```bash

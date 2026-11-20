@@ -77,6 +77,18 @@ pub struct IndexReport {
     pub warnings: Vec<String>,
 }
 
+/// Phase of home indexing. File counts include supported files discovered so far.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub enum InitProgress {
+    Preparing,
+    Catalogs,
+    Files(usize),
+    Applications,
+    LocalCommands,
+    Saving,
+}
+
 /// A snapshot of persisted index contents.
 #[derive(Debug, Serialize)]
 pub struct Status {
@@ -167,7 +179,7 @@ impl Index {
         options: &IndexOptions,
         model: &mut impl Embedder,
     ) -> Result<IndexReport> {
-        self.synchronize_sources(root, options, false, None, model, None)
+        self.synchronize_sources(root, options, None, None, model, None)
     }
 
     /// Refresh the installed command catalog alongside the ordinary index sources.
@@ -182,7 +194,7 @@ impl Index {
             cfg!(target_os = "linux"),
             "index --manpages is supported on Linux"
         );
-        self.synchronize_sources(root, options, false, Some(distro), model, None)
+        self.synchronize_sources(root, options, None, Some(distro), model, None)
     }
 
     /// Synchronize a selected folder and caption its supported images locally.
@@ -198,7 +210,7 @@ impl Index {
             manpages.is_none() || cfg!(target_os = "linux"),
             "index --manpages is supported on Linux"
         );
-        self.synchronize_sources(Some(root), options, false, manpages, model, Some(captioner))
+        self.synchronize_sources(Some(root), options, None, manpages, model, Some(captioner))
     }
 
     /// Synchronize the home directory, installed desktop applications, local commands and catalogs.
@@ -220,12 +232,24 @@ impl Index {
         model: &mut impl Embedder,
         captioner: Option<&mut dyn ImageCaptioner>,
     ) -> Result<IndexReport> {
+        self.initialize_home_with_progress(home, options, model, captioner, |_| {})
+    }
+
+    /// Initialize the home index and report phase changes and discovered files.
+    pub fn initialize_home_with_progress(
+        &mut self,
+        home: &Path,
+        options: &IndexOptions,
+        model: &mut impl Embedder,
+        captioner: Option<&mut dyn ImageCaptioner>,
+        mut progress: impl FnMut(InitProgress),
+    ) -> Result<IndexReport> {
         ensure!(cfg!(target_os = "linux"), "init is supported on Linux");
         ensure!(home.is_absolute(), "HOME must be an absolute path");
         self.synchronize_sources(
             Some(home),
             options,
-            true,
+            Some(&mut progress),
             Some(Distro::current()),
             model,
             captioner,
@@ -236,11 +260,14 @@ impl Index {
         &mut self,
         root: Option<&Path>,
         options: &IndexOptions,
-        initializing: bool,
+        progress: Option<&mut dyn FnMut(InitProgress)>,
         local_command_distro: Option<Distro>,
         model: &mut impl Embedder,
         captions: Option<&mut dyn ImageCaptioner>,
     ) -> Result<IndexReport> {
+        let initializing = progress.is_some();
+        let mut ignore_progress = |_| {};
+        let progress = progress.unwrap_or(&mut ignore_progress);
         ensure!(
             captions
                 .as_ref()
@@ -270,6 +297,7 @@ impl Index {
             [model.identity()],
         )?;
         let mut report = IndexReport::default();
+        progress(InitProgress::Catalogs);
         synchronize_catalog(&tx, model, &mut report)?;
         synchronize_commands(&tx, model, &mut report)?;
         if let Some(root) = root {
@@ -307,16 +335,27 @@ impl Index {
                 captioner,
                 required: !initializing,
             });
-            synchronize_files(&tx, &root, name, &exclusions, model, captions, &mut report)?;
+            synchronize_files(
+                &tx,
+                &root,
+                &exclusions,
+                model,
+                captions,
+                &mut report,
+                progress,
+            )?;
             if initializing {
+                progress(InitProgress::Applications);
                 let applications = applications::discover(&root)?;
                 synchronize_applications(&tx, &applications, model, &mut report)?;
             }
         }
         if let Some(distro) = local_command_distro {
+            progress(InitProgress::LocalCommands);
             synchronize_local_commands(&tx, distro, model, &mut report)?;
         }
         if initializing {
+            progress(InitProgress::Saving);
             tx.execute(
                 "INSERT OR IGNORE INTO metadata (key, value) VALUES (?1, '1')",
                 [INIT_COMPLETED_KEY],
@@ -756,12 +795,13 @@ struct CaptionScan<'a> {
 fn synchronize_files(
     tx: &Transaction<'_>,
     root: &Path,
-    root_name: &str,
     exclusions: &[PathBuf],
     model: &mut impl Embedder,
     mut captions: Option<CaptionScan<'_>>,
     report: &mut IndexReport,
+    progress: &mut dyn FnMut(InitProgress),
 ) -> Result<()> {
+    let root_name = root.to_str().context("index roots must be valid UTF-8")?;
     tx.execute_batch(
         "CREATE TEMP TABLE IF NOT EXISTS seen (id INTEGER PRIMARY KEY); DELETE FROM seen;",
     )?;
@@ -785,6 +825,8 @@ fn synchronize_files(
                         }
                     }))
         });
+    let mut discovered = 0;
+    progress(InitProgress::Files(discovered));
     for entry in walker {
         let entry = entry.context("scan directory (changes rolled back)")?;
         if !entry.file_type().is_file() {
@@ -801,6 +843,8 @@ fn synchronize_files(
         let Some(kind) = FileKind::from_extension(&extension) else {
             continue;
         };
+        discovered += 1;
+        progress(InitProgress::Files(discovered));
         let key = path.to_str().context("file paths must be valid UTF-8")?;
         let title = entry
             .file_name()

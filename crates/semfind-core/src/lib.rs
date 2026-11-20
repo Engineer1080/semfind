@@ -14,7 +14,7 @@ mod translations;
 pub use commands::Distro;
 pub use files::{FileKind, HitLocation};
 pub use images::{FlorenceCaptioner, ImageCaptioner};
-pub use index::{Index, IndexOptions, IndexReport, Status};
+pub use index::{Index, IndexOptions, IndexReport, InitProgress, Status};
 pub use locale::Language;
 pub use model::{Embedder, ExecutionDevice, InputKind, LocalModel};
 pub use search::{Category, Hit, SearchOptions};

@@ -5,6 +5,7 @@ use semfind_core::{
     IndexOptions, IndexReport, Language, LocalModel, SearchOptions,
 };
 mod distro;
+mod progress;
 mod ui;
 use distro::DistroFilter;
 use std::{
@@ -342,7 +343,7 @@ fn print_localized_help(error: clap::Error, messages: &Messages) -> ! {
     std::process::exit(status)
 }
 
-fn run(cli: Cli, output: &mut impl Write, messages: &Messages) -> Result<()> {
+fn run(cli: Cli, output: &mut impl Write, messages: &'static Messages) -> Result<()> {
     let dir = match cli.index_dir {
         Some(path) => path,
         None => data_dir(messages)?.join("index"),
@@ -440,14 +441,21 @@ fn run(cli: Cli, output: &mut impl Write, messages: &Messages) -> Result<()> {
                 },
                 None => None,
             };
-            let report = index.initialize_home_with_image_captions(
+            let progress = progress::Progress::start(messages);
+            let report = index.initialize_home_with_progress(
                 Path::new(&home),
                 &IndexOptions {
                     exclude: (clear_excludes || !exclude.is_empty()).then_some(exclude),
                 },
                 &mut start_model()?,
                 captioner.as_mut().map(|model| model as &mut _),
+                |phase| {
+                    if let Some(progress) = &progress {
+                        progress.update(phase);
+                    }
+                },
             )?;
+            drop(progress);
             print_index_report(output, &report, messages)?;
         }
         Some(Command::Index {

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.4
+
+- Show the current phase, elapsed time, and discovered file count during interactive `semfind init` runs. Progress appears on terminal stderr, and stdout still carries the final summary.
+- Document APT package distribution as planned work for Pop!_OS and Ubuntu 24.04.
+
 ## 0.2.3
 
 - Add an optional COSMIC Launcher plugin that shows local Semfind hits alongside launcher results. Use `semfind <query>` to see up to eight hits in Semfind's ranking order.
