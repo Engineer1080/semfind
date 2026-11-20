@@ -1,6 +1,6 @@
 # semfind
 
-An experimental, offline search engine for the Linux terminal. Use everyday language to find files in selected folders, desktop applications, COSMIC settings, and Linux commands.
+semfind is an offline search CLI for Linux. Search in everyday language to find files, installed applications, COSMIC settings, and Linux commands. Use `--json` for structured results in scripts, applications, and AI agents.
 
 Linux filename search helps when you know what a file is called. Full-text search helps when you remember its wording. semfind also compares the meaning of a query with document passages. A German question can retrieve an English document, and an exact filename, settings ID, or error code still takes priority.
 
@@ -15,7 +15,19 @@ Linux filename search helps when you know what a file is called. Full-text searc
 - Filters for folder, file extension, file kind (text, image, video), and result category. JSON for scripting.
 - Incremental rescans that recalculate embeddings only for changed content. Saved directory exclusions and manual index removal.
 
-The target desktop is Pop!_OS 24.04 with COSMIC. The CLI works independently of the desktop. See [verification](docs/verification.md) for the environments exercised.
+The CLI works independently of the desktop environment. Pop!_OS 24.04 is one of the [tested environments](docs/verification.md). Desktop search and launcher integrations for KDE Plasma, GNOME, COSMIC, and other Linux desktops are planned. See the [roadmap](docs/roadmap.md) and [COSMIC research](integrations/cosmic/README.md).
+
+## Use semfind from programs and AI agents
+
+Call semfind as a subprocess to find local sources for a natural-language question. `--category`, `--path`, and `--limit` narrow the results before the caller opens a file or consults a manual. The index and model run locally after setup.
+
+```bash
+semfind "How do I show free disk space?" --category command --limit 3 --json
+```
+
+This query can return `df` with the example `df -h`. For file results, the JSON includes the source path and a matching text excerpt that a program or agent can use to inspect the original file. Use `semfind status --json` to check which directories are indexed.
+
+With `--json`, search writes a JSON array to stdout, including `[]` for zero results. Diagnostics go to stderr. Exit codes are `0` for success (including zero hits), `1` for an operational error, and `2` for invalid CLI usage.
 
 ## Install on Pop!_OS 24.04
 
@@ -183,7 +195,7 @@ semfind index "$HOME/Documents"  # rescan with the saved exclusions
 semfind unindex "$HOME/Documents"
 ```
 
-Passing exclusions replaces the saved list for that root. Use `--clear-excludes` to clear it. Quote multiword queries. Use `semfind search "status"` to search for a semfind subcommand name. Search outputs a JSON array with `--json`, including an empty array for zero results. Exit codes are `0` for success (including zero hits), `1` for an operational error, and `2` for invalid CLI usage. Diagnostics go to stderr.
+Passing exclusions replaces the saved list for that root. Use `--clear-excludes` to clear it. Quote multiword queries. Use `semfind search "status"` to search for a semfind subcommand name.
 
 Local data defaults to `${XDG_DATA_HOME:-$HOME/.local/share}/semfind`. Set `SEMFIND_MODEL_DIR` and `SEMFIND_INDEX_DIR` to use other locations. The index directory must be private on Linux.
 
@@ -191,7 +203,7 @@ Local data defaults to `${XDG_DATA_HOME:-$HOME/.local/share}/semfind`. Set `SEMF
 
 The Rust CLI calls the same library that future clients will use. The core stages reads, extracts text, and stores passages and vectors in a single SQLite transaction. A local worker runs the embedding model through ONNX Runtime on the CPU or with NVIDIA CUDA or AMD MIGraphX. Query-time cosine similarity and FTS5's BM25 rankings are fused with Reciprocal Rank Fusion. See [architecture](docs/architecture.md) and [privacy](docs/privacy.md).
 
-The MVP is intended for small collections. Exact cosine search scales linearly with the number of passages. Semantic hits use a model-specific cosine similarity cutoff. Literal and full-text matching still apply at any similarity. Scanned PDFs require a text layer. Settings results carry catalog metadata. A desktop UI, launching apps from results, a background service, and file history are roadmap items. See [roadmap](docs/roadmap.md) and [COSMIC research](integrations/cosmic/README.md).
+Semfind is intended for small collections. Exact cosine search scales linearly with the number of passages. Semantic hits use a model-specific cosine similarity cutoff. Literal and full-text matching still apply at any similarity. Scanned PDFs require a text layer. Settings results carry catalog metadata.
 
 ## Contribute
 
