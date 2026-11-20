@@ -2,6 +2,7 @@
 
 ```mermaid
 flowchart LR
+    Cosmic[COSMIC Launcher plugin] -->|Local JSON stream| CLI
     CLI[semfind CLI] --> Core[semfind-core]
     Files[Selected files] --> Core
     Catalog[COSMIC catalog] --> Core

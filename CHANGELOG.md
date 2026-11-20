@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.3
+
+- Add an optional COSMIC Launcher plugin that shows local Semfind hits alongside launcher results. Use `semfind <query>` to see up to eight hits in Semfind's ranking order.
+- Open files, installed applications, and supported COSMIC settings directly from search results. Linux command hits display usage examples.
+- Add a user-local installer that reuses the configured Semfind index and model. The launcher keeps the search process running so subsequent queries reuse the loaded model.
+
 ## 0.2.2
 
 - Search JPEG, PNG, and WebP images by subject using locally generated Florence-2 captions. Queries can return both images and documents. Use `--kind image` to show only images.

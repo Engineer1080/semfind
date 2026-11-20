@@ -58,7 +58,8 @@ impl<'a> Passage<'a> {
 }
 
 impl FileKind {
-    pub(crate) fn from_extension(extension: &str) -> Option<Self> {
+    /// Classify a normalized lowercase extension without its leading dot.
+    pub fn from_extension(extension: &str) -> Option<Self> {
         match extension {
             "txt" | "md" | "markdown" | "log" | "csv" | "rst" | "pdf" => Some(Self::Text),
             "jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp" | "tif" | "tiff" | "avif" | "heic"

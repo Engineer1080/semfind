@@ -1,0 +1,13 @@
+(
+    name: "Semfind",
+    description: "Search local files, applications, settings, and Linux commands. Use semfind <query> to show only Semfind results.",
+    bin: (path: "semfind-cosmic"),
+    icon: Name("system-search"),
+    query: (
+        regex: "\\S",
+        isolate_with: "(?i)^\\s*semfind(\\s|$)",
+        no_sort: true,
+        help: "semfind ",
+    ),
+    long_lived: true,
+)

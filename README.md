@@ -15,8 +15,9 @@ Linux filename search helps when you know what a file is called. Full-text searc
 - Filters for folder, file extension, file kind (text, image, video), and result category. JSON for scripting.
 - With Florence-2 set up, `semfind init` makes JPEG, PNG, and WebP images searchable by subject alongside documents.
 - Incremental rescans that recalculate embeddings only for changed content. Saved directory exclusions and manual index removal.
+- An optional COSMIC Launcher plugin searches the same index. [Installation and usage](integrations/cosmic/README.md)
 
-The CLI works independently of the desktop environment. Pop!_OS 24.04 is one of the [tested environments](docs/verification.md). Desktop search and launcher integrations for KDE Plasma, GNOME, COSMIC, and other Linux desktops are planned. See the [roadmap](docs/roadmap.md) and [COSMIC research](integrations/cosmic/README.md).
+The CLI works independently of the desktop environment. Pop!_OS 24.04 is one of the [tested environments](docs/verification.md). See the [roadmap](docs/roadmap.md) for planned desktop integrations and other work.
 
 ## Use semfind from programs and AI agents
 

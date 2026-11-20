@@ -1,9 +1,9 @@
 [workspace]
-members = ["crates/semfind-core", "crates/semfind-cli"]
+members = ["crates/semfind-core", "crates/semfind-cli", "integrations/cosmic"]
 resolver = "3"
 
 [workspace.package]
-version = "0.2.2"
+version = "0.2.3"
 edition = "2024"
 license = "Apache-2.0"
 rust-version = "1.93"

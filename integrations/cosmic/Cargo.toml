@@ -1,0 +1,16 @@
+[package]
+name = "semfind-cosmic"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Semfind plugin for the COSMIC launcher"
+
+[dependencies]
+anyhow = "1"
+semfind-core = { path = "../../crates/semfind-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
