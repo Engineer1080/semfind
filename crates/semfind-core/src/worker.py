@@ -120,11 +120,19 @@ def main():
     options.intra_op_num_threads = 2
     options.inter_op_num_threads = 1
     options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-    device = sys.argv[2]
-    if device == "auto":
+    device, _, priority_mode = sys.argv[2].partition("-")
+    optional_gpu = priority_mode == "auto"
+    allow_cpu_fallback = device == "auto" or optional_gpu
+    if allow_cpu_fallback:
         # Keep ordinary graph placement warnings out of CLI output.
         options.log_severity_level = 3
-    session = create_session(model, options, device)
+    try:
+        session = create_session(model, options, device)
+    except (RuntimeError, SystemExit) as error:
+        if not optional_gpu:
+            raise
+        print(json.dumps({"error": str(error)}))
+        return
     provider = session.get_providers()[0]
     tokenizer = Tokenizer.from_file(str(tokenizer_file))
     tokenizer.enable_truncation(max_length=encoding["max_tokens"])
@@ -139,7 +147,11 @@ def main():
     if not any(node.name == output for node in session.get_outputs()):
         raise ValueError(f"ONNX model does not provide output {output!r}")
 
-    print(json.dumps({"identity": recipe + ":" + ":".join(hashes), "minimum_similarity": cutoff}))
+    print(json.dumps({
+        "identity": recipe + ":" + ":".join(hashes),
+        "minimum_similarity": cutoff,
+        "provider": provider,
+    }))
     pooling = encoding["pooling"]
     for line in sys.stdin:
         prefix, texts = json.loads(line)
@@ -154,7 +166,7 @@ def main():
         try:
             hidden, = session.run([output], feeds)
         except Exception:
-            if device != "auto" or provider == CPU_PROVIDER:
+            if not allow_cpu_fallback or provider == CPU_PROVIDER:
                 raise
             print(f"semfind: {provider} inference failed. Using the CPU.", file=sys.stderr)
             del session
@@ -172,7 +184,10 @@ def main():
             pooled = (hidden * mask).sum(axis=1) / mask.sum(axis=1)
         if pooled.ndim != 2 or pooled.shape[0] != len(texts):
             raise ValueError("ONNX model must produce one embedding vector per input")
-        print(json.dumps(pooled.tolist(), allow_nan=False))
+        print(json.dumps({
+            "vectors": pooled.tolist(),
+            "uses_cpu": provider == CPU_PROVIDER,
+        }, allow_nan=False))
 
 
 if __name__ == "__main__":

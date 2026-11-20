@@ -118,27 +118,30 @@ Changes to the weights, tokenizer, or encoding settings require a full rebuild o
 
 ### Run inference on an NVIDIA GPU
 
-Starting with 0.1.8, Semfind tries NVIDIA CUDA automatically when the selected Python environment has ONNX Runtime GPU. The standard Python requirements provide the CPU runtime. To enable automatic GPU use, select a Python environment with ONNX Runtime GPU and check that `nvidia-smi` can see the GPU. The PyPI build below requires a driver that supports CUDA 13 and installs the CUDA and cuDNN runtime libraries through pip. [ONNX Runtime CUDA requirements](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html#requirements)
+For automatic CUDA use during `semfind init`, create a dedicated Python environment under the Semfind data directory. Check that `nvidia-smi` can see the GPU. The PyPI build below requires a driver that supports CUDA 13 and installs the CUDA and cuDNN runtime libraries through pip. [ONNX Runtime CUDA requirements](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html#requirements)
 
 ```bash
-python3 -m venv .venv-cuda
-.venv-cuda/bin/python -m pip install 'onnxruntime-gpu[cuda,cudnn]==1.32.0' 'numpy==2.5.5' 'tokenizers==0.23.3'
-export SEMFIND_PYTHON="$PWD/.venv-cuda/bin/python"
-semfind 'How do I find files modified today?'
+cuda_runtime="${XDG_DATA_HOME:-$HOME/.local/share}/semfind/runtime/cuda"
+python3 -m venv "$cuda_runtime"
+"$cuda_runtime/bin/python" -m pip install 'onnxruntime-gpu[cuda,cudnn]==1.32.0' 'numpy==2.5.5' 'tokenizers==0.23.3'
+semfind init --time
 ```
 
-The default is `--device auto`. Semfind tries CUDA, then MIGraphX, then the CPU, depending on which providers the selected Python environment offers. Use `--device cpu` to force CPU inference or `--device cuda` to require CUDA. You can also set `SEMFIND_DEVICE`. The same model and weights can reuse an index on another backend. Tokenization, filesystem scanning, SQLite, and search ranking still run on the CPU. On the tested RTX 4080 SUPER, CUDA sped up index building and searches with a running model worker. Individual semantic searches in the CLI took longer because each starts a new CUDA session. [CPU and CUDA benchmark](benchmarks/retrieval/README.md#granite-97m-cpu-and-cuda-results)
+With the default `--device auto`, `init` first tries dedicated runtimes in `runtime/cuda` and `runtime/migraphx` under the Semfind data directory, in that order. You can symlink either directory to an existing virtual environment. If neither dedicated GPU starts, Semfind uses its configured Python environment and tries CUDA, MIGraphX, then CPU as available. A GPU inference error in automatic mode retries on the CPU. `init --time` reports the provider selected at startup. Florence-2 continues to use the configured Python environment and CPU captioning.
+
+When a search or indexing command uses the CPU for text embeddings, Semfind prints a performance tip with CUDA and MIGraphX setup links on stderr once per invocation. Use `--no-gpu-hint` to suppress it for one invocation, or set `SEMFIND_NO_GPU_HINT=true` for your environment.
+
+For searches, manual indexes, or an explicit `--device` selection, use `--python` or `SEMFIND_PYTHON` to select the desired Python environment. Use `--device cpu` to force CPU inference or `--device cuda` to require CUDA. You can also set `SEMFIND_DEVICE`. The same model and weights can reuse an index on another backend. Tokenization, filesystem scanning, SQLite, and search ranking run on the CPU. On the tested RTX 4080 SUPER, CUDA sped up index building and searches with a running model worker. Individual semantic searches in the CLI took longer because each starts a new CUDA session. [CPU and CUDA benchmark](benchmarks/retrieval/README.md#granite-97m-cpu-and-cuda-results)
 
 ### AMD GPUs
 
-Semfind 0.1.8 introduces experimental MIGraphX support. Install ROCm for your GPU and Linux distribution. Follow AMD's guide to install its MIGraphX-enabled ONNX Runtime in a separate Python environment such as `.venv-amd`. Install NumPy and Tokenizers in that environment. The standard `requirements.txt` installs the CPU build of ONNX Runtime, so use AMD's package for this environment. [AMD ONNX Runtime setup and compatibility](https://rocm.docs.amd.com/projects/ai-ecosystem/en/latest/inference/onnxruntime.html)
+Semfind supports AMD MIGraphX experimentally. Install ROCm for your GPU and Linux distribution. Follow AMD's guide to install its MIGraphX-enabled ONNX Runtime in a separate Python environment. Use `${XDG_DATA_HOME:-$HOME/.local/share}/semfind/runtime/migraphx` for automatic discovery by `init`. Install NumPy and Tokenizers in that environment. [AMD ONNX Runtime setup and compatibility](https://rocm.docs.amd.com/projects/ai-ecosystem/en/latest/inference/onnxruntime.html)
 
 ```bash
-.venv-amd/bin/python -m pip install 'numpy==2.5.5' 'tokenizers==0.23.3'
-export SEMFIND_PYTHON="$PWD/.venv-amd/bin/python"
-"$SEMFIND_PYTHON" -c 'import onnxruntime as ort; print(ort.get_available_providers())'
-semfind --device migraphx index
-semfind --device migraphx 'How do I find files modified today?'
+amd_runtime="${XDG_DATA_HOME:-$HOME/.local/share}/semfind/runtime/migraphx"
+"$amd_runtime/bin/python" -m pip install 'numpy==2.5.5' 'tokenizers==0.23.3'
+"$amd_runtime/bin/python" -c 'import onnxruntime as ort; print(ort.get_available_providers())'
+semfind init --time
 ```
 
 The provider list should include `MIGraphXExecutionProvider`. The explicit `--device migraphx` setting reports an error if the provider cannot start or inference fails. ONNX Runtime can still place individual graph operations on the CPU. With the default `--device auto`, Semfind falls back to the CPU if GPU inference fails. Granite 97M execution and performance on AMD hardware still need verification. [ONNX Runtime MIGraphX provider](https://onnxruntime.ai/docs/execution-providers/MIGraphX-ExecutionProvider.html)

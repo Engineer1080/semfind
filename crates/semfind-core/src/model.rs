@@ -46,12 +46,27 @@ pub struct LocalModel {
     worker: PythonWorker,
     identity: String,
     minimum_similarity: Option<f32>,
+    initial_provider: String,
+    uses_cpu: bool,
 }
 
 #[derive(serde::Deserialize)]
-struct WorkerReady {
-    identity: String,
-    minimum_similarity: Option<f32>,
+#[serde(untagged)]
+enum WorkerReady {
+    Ready {
+        identity: String,
+        minimum_similarity: Option<f32>,
+        provider: String,
+    },
+    Failed {
+        error: String,
+    },
+}
+
+#[derive(serde::Deserialize)]
+struct WorkerEmbeddings {
+    vectors: Vec<Vec<f32>>,
+    uses_cpu: bool,
 }
 
 impl LocalModel {
@@ -68,6 +83,24 @@ impl LocalModel {
             ExecutionDevice::Cuda => "cuda",
             ExecutionDevice::Migraphx => "migraphx",
         };
+        Self::start_worker(python, directory, device)
+    }
+
+    /// Require the selected GPU at startup and retry failed inference on the CPU.
+    pub fn start_gpu_with_fallback(
+        python: &Path,
+        directory: &Path,
+        device: ExecutionDevice,
+    ) -> Result<Self> {
+        let device = match device {
+            ExecutionDevice::Cuda => "cuda-auto",
+            ExecutionDevice::Migraphx => "migraphx-auto",
+            _ => bail!("a GPU backend is required"),
+        };
+        Self::start_worker(python, directory, device)
+    }
+
+    fn start_worker(python: &Path, directory: &Path, device: &str) -> Result<Self> {
         let mut worker = PythonWorker::start(
             python,
             include_str!("worker.py"),
@@ -76,12 +109,32 @@ impl LocalModel {
         let ready: WorkerReady = worker
             .receive()
             .context("load the local model (see README setup)")?;
-        ensure!(!ready.identity.is_empty(), "empty model identity");
+        let (identity, minimum_similarity, initial_provider) = match ready {
+            WorkerReady::Ready {
+                identity,
+                minimum_similarity,
+                provider,
+            } => (identity, minimum_similarity, provider),
+            WorkerReady::Failed { error } => bail!("{error}"),
+        };
+        ensure!(!identity.is_empty(), "empty model identity");
         Ok(Self {
             worker,
-            identity: ready.identity,
-            minimum_similarity: ready.minimum_similarity,
+            identity,
+            minimum_similarity,
+            uses_cpu: initial_provider == "CPUExecutionProvider",
+            initial_provider,
         })
+    }
+
+    /// ONNX Runtime provider selected at worker startup.
+    pub fn initial_provider(&self) -> &str {
+        &self.initial_provider
+    }
+
+    /// Whether the worker currently uses the CPU as its primary provider.
+    pub fn uses_cpu(&self) -> bool {
+        self.uses_cpu
     }
 }
 
@@ -139,7 +192,9 @@ impl Embedder for LocalModel {
         serde_json::to_writer(&mut self.worker.input, &(prefix, texts))?;
         self.worker.input.write_all(b"\n")?;
         self.worker.input.flush()?;
-        self.worker.receive()
+        let result: WorkerEmbeddings = self.worker.receive()?;
+        self.uses_cpu = result.uses_cpu;
+        Ok(result.vectors)
     }
 }
 

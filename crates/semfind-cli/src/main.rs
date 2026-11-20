@@ -47,6 +47,9 @@ struct Cli {
     device: DeviceChoice,
     #[arg(long, env = "SEMFIND_PYTHON", default_value = "python3", global = true)]
     python: PathBuf,
+    /// Suppress the GPU setup tip shown during CPU inference.
+    #[arg(long, env = "SEMFIND_NO_GPU_HINT", global = true)]
+    no_gpu_hint: bool,
     #[command(subcommand)]
     command: Option<Command>,
     #[command(flatten)]
@@ -267,7 +270,10 @@ fn main() -> ExitCode {
 }
 
 fn localized_help(messages: &Messages) -> clap::Command {
-    apply_search_help(Cli::command().about(messages.about), messages)
+    let command = Cli::command()
+        .about(messages.about)
+        .mut_arg("no_gpu_hint", |arg| arg.help(messages.no_gpu_hint));
+    apply_search_help(command, messages)
         .mut_subcommand("init", |sub| {
             sub.about(messages.init)
                 .mut_arg("force", |arg| arg.help(messages.force_init))
@@ -352,6 +358,10 @@ fn print_localized_help(error: clap::Error, messages: &Messages) -> ! {
 }
 
 fn run(cli: Cli, output: &mut impl Write, messages: &'static Messages) -> Result<()> {
+    let mut gpu_hint = GpuHint {
+        pending: !cli.no_gpu_hint,
+        messages,
+    };
     let dir = match cli.index_dir {
         Some(path) => path,
         None => data_dir(messages)?.join("index"),
@@ -377,21 +387,21 @@ fn run(cli: Cli, output: &mut impl Write, messages: &'static Messages) -> Result
         }
         _ => ModelChoice::Granite97M,
     };
-    let start_model = || {
-        let directory = match &cli.model_dir {
-            Some(path) => path.clone(),
-            None => data_dir(messages)?
+    let model_directory = || -> Result<PathBuf> {
+        match &cli.model_dir {
+            Some(path) => Ok(path.clone()),
+            None => Ok(data_dir(messages)?
                 .join("model")
-                .join(selected_model.directory()),
-        };
-        let device = match cli.device {
-            DeviceChoice::Auto => ExecutionDevice::Auto,
-            DeviceChoice::Cpu => ExecutionDevice::Cpu,
-            DeviceChoice::Cuda => ExecutionDevice::Cuda,
-            DeviceChoice::Migraphx => ExecutionDevice::Migraphx,
-        };
-        LocalModel::start_on(&cli.python, &directory, device)
+                .join(selected_model.directory())),
+        }
     };
+    let device = match cli.device {
+        DeviceChoice::Auto => ExecutionDevice::Auto,
+        DeviceChoice::Cpu => ExecutionDevice::Cpu,
+        DeviceChoice::Cuda => ExecutionDevice::Cuda,
+        DeviceChoice::Migraphx => ExecutionDevice::Migraphx,
+    };
+    let start_model = || LocalModel::start_on(&cli.python, &model_directory()?, device);
     let caption_directory = || -> Result<PathBuf> {
         match &cli.caption_model_dir {
             Some(path) => Ok(path.clone()),
@@ -454,6 +464,8 @@ fn run(cli: Cli, output: &mut impl Write, messages: &'static Messages) -> Result
                 None => None,
             };
             let progress = progress::Progress::start(messages);
+            let mut model = start_init_model(&cli.python, &model_directory()?, device, messages)?;
+            gpu_hint.show(&model, progress.is_some());
             let initialize = if force {
                 Index::rebuild_home_with_progress
             } else {
@@ -465,7 +477,7 @@ fn run(cli: Cli, output: &mut impl Write, messages: &'static Messages) -> Result
                 &IndexOptions {
                     exclude: (clear_excludes || !exclude.is_empty()).then_some(exclude),
                 },
-                &mut start_model()?,
+                &mut model,
                 captioner.as_mut().map(|model| model as &mut _),
                 |phase| {
                     if let Some(timing) = &mut timing {
@@ -475,10 +487,16 @@ fn run(cli: Cli, output: &mut impl Write, messages: &'static Messages) -> Result
                         progress.update(phase);
                     }
                 },
-            )?;
+            );
             let timing = timing.map(progress::Timing::finish);
             drop(progress);
+            gpu_hint.show(&model, false);
+            let report = report?;
             if let Some(timing) = timing {
+                eprintln!(
+                    "semfind: ONNX Runtime (startup): {}",
+                    model.initial_provider()
+                );
                 timing.print(messages);
             }
             print_index_report(output, &report, messages)?;
@@ -494,6 +512,7 @@ fn run(cli: Cli, output: &mut impl Write, messages: &'static Messages) -> Result
                 exclude: (clear_excludes || !exclude.is_empty()).then_some(exclude),
             };
             let mut model = start_model()?;
+            gpu_hint.show(&model, false);
             let report = if caption_images {
                 let directory = caption_directory()?;
                 let mut captioner = FlorenceCaptioner::new(&cli.python, &directory)?;
@@ -514,15 +533,61 @@ fn run(cli: Cli, output: &mut impl Write, messages: &'static Messages) -> Result
             } else {
                 index.synchronize(root.as_deref(), &options, &mut model)?
             };
+            gpu_hint.show(&model, false);
             print_index_report(output, &report, messages)?;
         }
         Some(Command::Search(mut search)) => {
             search.time |= cli.search.time;
-            run_search(&index, search, start_model, output, messages)?;
+            run_search(&index, search, start_model, output, messages, gpu_hint)?;
         }
-        None => run_search(&index, cli.search, start_model, output, messages)?,
+        None => run_search(&index, cli.search, start_model, output, messages, gpu_hint)?,
     }
     Ok(())
+}
+
+struct GpuHint<'a> {
+    pending: bool,
+    messages: &'a Messages,
+}
+
+impl GpuHint<'_> {
+    fn show(&mut self, model: &LocalModel, progress_active: bool) {
+        if !self.pending || !model.uses_cpu() {
+            return;
+        }
+        self.pending = false;
+        let mut stderr = io::stderr().lock();
+        let clear = if progress_active { "\r\x1b[K" } else { "" };
+        let _ = writeln!(
+            stderr,
+            "{clear}semfind: {}\nsemfind: {}\n  NVIDIA (CUDA)    https://github.com/Engineer1080/semfind#run-inference-on-an-nvidia-gpu\n  AMD (MIGraphX)   https://github.com/Engineer1080/semfind#amd-gpus",
+            self.messages.cpu_hint, self.messages.gpu_setup,
+        );
+    }
+}
+
+fn start_init_model(
+    python: &Path,
+    directory: &Path,
+    device: ExecutionDevice,
+    messages: &Messages,
+) -> Result<LocalModel> {
+    if matches!(device, ExecutionDevice::Auto) {
+        let runtime_dir = data_dir(messages)?.join("runtime");
+        for (name, backend) in [
+            ("cuda", ExecutionDevice::Cuda),
+            ("migraphx", ExecutionDevice::Migraphx),
+        ] {
+            let interpreter = runtime_dir.join(name).join("bin/python");
+            if interpreter.is_file() {
+                match LocalModel::start_gpu_with_fallback(&interpreter, directory, backend) {
+                    Ok(model) => return Ok(model),
+                    Err(error) => eprintln!("semfind: {}: {error:#}", interpreter.display()),
+                }
+            }
+        }
+    }
+    LocalModel::start_on(python, directory, device)
 }
 
 fn open_optional_captioner<'a>(
@@ -562,6 +627,7 @@ fn run_search(
     start_model: impl Fn() -> Result<LocalModel>,
     output: &mut impl Write,
     messages: &Messages,
+    mut gpu_hint: GpuHint<'_>,
 ) -> Result<()> {
     let local_distro = Distro::current();
     let selected_distro = search.distro.map(Into::into).unwrap_or(local_distro);
@@ -581,6 +647,9 @@ fn run_search(
         if let Some(started) = started {
             let milliseconds = started.elapsed().as_secs_f64() * 1000.0;
             eprintln!("semfind: {} {milliseconds:.2} ms", messages.search_time);
+        }
+        if let Some(model) = &model {
+            gpu_hint.show(model, false);
         }
         Ok(hits)
     };

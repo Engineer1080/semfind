@@ -12,7 +12,11 @@ use std::{
 
 fn cli(index: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_semfind"));
-    command.arg("--index-dir").arg(index).env("LC_ALL", "C");
+    command
+        .arg("--index-dir")
+        .arg(index)
+        .env("LC_ALL", "C")
+        .env_remove("SEMFIND_NO_GPU_HINT");
     command
 }
 
@@ -76,6 +80,7 @@ fn search_time_is_opt_in_and_preserves_json() -> Result<()> {
     let index = temp.path().join("index");
     let untimed = cli(&index).args(["missing", "--json"]).output()?;
     assert!(!String::from_utf8_lossy(&untimed.stderr).contains("Search time"));
+    assert!(!String::from_utf8_lossy(&untimed.stderr).contains("GPU setup instructions"));
     let baseline = success(untimed)?;
     for args in [
         &["missing", "--json", "--time"][..],
@@ -550,9 +555,12 @@ fn real_model_init_indexes_home_desktop_applications_and_manuals() -> Result<()>
     fs::remove_file(user_apps.join("viewer.desktop"))?;
     fs::remove_file(system_apps.join("viewer.desktop"))?;
     fs::remove_file(manual)?;
-    let next_init = command().args(["init", "--no-caption-images"]).output()?;
+    let next_init = command()
+        .args(["init", "--no-caption-images", "--no-gpu-hint"])
+        .output()?;
     assert!(!String::from_utf8_lossy(&next_init.stderr).contains("Florence-2"));
     assert!(!String::from_utf8_lossy(&next_init.stderr).contains("Total indexing time"));
+    assert!(!String::from_utf8_lossy(&next_init.stderr).contains("GPU setup instructions"));
     let report = String::from_utf8(success(next_init)?)?;
     assert!(
         report.contains(&format!(
@@ -576,9 +584,20 @@ fn real_model_init_indexes_home_desktop_applications_and_manuals() -> Result<()>
     run(&["index", extra.to_str().unwrap(), "--exclude", "Private"])?;
     let before: serde_json::Value = serde_json::from_slice(&run(&["status", "--json"])?)?;
     let timed = command()
-        .args(["init", "--force", "--time", "--no-caption-images"])
+        .args([
+            "--device",
+            "cpu",
+            "init",
+            "--force",
+            "--time",
+            "--no-caption-images",
+        ])
         .output()?;
     let stderr = String::from_utf8_lossy(&timed.stderr);
+    assert!(stderr.contains("semfind: ONNX Runtime (startup): CPUExecutionProvider"));
+    assert_eq!(stderr.matches("A GPU can compute embeddings").count(), 1);
+    assert!(stderr.contains("semfind#run-inference-on-an-nvidia-gpu"));
+    assert!(stderr.contains("semfind#amd-gpus"));
     for label in [
         "semfind: Total indexing time",
         "  Preparing models",
@@ -598,6 +617,7 @@ fn real_model_init_indexes_home_desktop_applications_and_manuals() -> Result<()>
     }
     let rebuilt = String::from_utf8(success(timed)?)?;
     assert!(!rebuilt.contains("Total indexing time"));
+    assert!(!rebuilt.contains("GPU setup"));
     assert!(
         rebuilt.contains(&format!("Written: {} | Unchanged: 0", 6 + commands)),
         "{rebuilt}"
@@ -612,7 +632,25 @@ fn real_model_init_indexes_home_desktop_applications_and_manuals() -> Result<()>
         .args(["init", "--force", "--no-caption-images"])
         .output()?;
     assert_eq!(failed_rebuild.status.code(), Some(1));
-    let hits: Vec<Hit> = serde_json::from_slice(&run(&["notes.txt", "--limit", "1", "--json"])?)?;
+    let query = ["--device", "cpu", "notes.txt", "--limit", "1", "--json"];
+    let search = command().args(query).output()?;
+    assert_eq!(
+        String::from_utf8_lossy(&search.stderr)
+            .matches("GPU setup instructions")
+            .count(),
+        1
+    );
+    let search_output = success(search)?;
+    let quiet = command().args(query).arg("--no-gpu-hint").output()?;
+    assert!(!String::from_utf8_lossy(&quiet.stderr).contains("GPU setup instructions"));
+    assert_eq!(success(quiet)?, search_output);
+    let quiet_env = command()
+        .env("SEMFIND_NO_GPU_HINT", "true")
+        .args(query)
+        .output()?;
+    assert!(!String::from_utf8_lossy(&quiet_env.stderr).contains("GPU setup instructions"));
+    assert_eq!(success(quiet_env)?, search_output);
+    let hits: Vec<Hit> = serde_json::from_slice(&search_output)?;
     assert_eq!(hits[0].snippet, "Document available for search");
     let after_failure: serde_json::Value = serde_json::from_slice(&run(&["status", "--json"])?)?;
     assert_eq!(after_failure, before);

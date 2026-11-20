@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.7
+
+- Let `semfind init` use dedicated NVIDIA CUDA or AMD MIGraphX Python environments automatically, with CPU fallback. `init --time` also reports the ONNX Runtime provider selected at startup.
+- Show a localized GPU performance tip once per search or indexing command when it uses the CPU for text embeddings. Suppress it with `--no-gpu-hint` or `SEMFIND_NO_GPU_HINT=true`.
+
 ## 0.2.6
 
 - Add `semfind init --time` to report total indexing time and the duration of each phase in seconds on stderr. It also works with `--force`. The final index summary remains on stdout.
