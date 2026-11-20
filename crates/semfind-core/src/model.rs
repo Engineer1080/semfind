@@ -32,6 +32,13 @@ pub struct LocalModel {
     input: BufWriter<ChildStdin>,
     output: BufReader<ChildStdout>,
     identity: String,
+    minimum_similarity: Option<f32>,
+}
+
+#[derive(serde::Deserialize)]
+struct WorkerReady {
+    identity: String,
+    minimum_similarity: Option<f32>,
 }
 
 impl LocalModel {
@@ -55,12 +62,14 @@ impl LocalModel {
             input,
             output,
             identity: String::new(),
+            minimum_similarity: None,
         };
-        let ready: String = model
+        let ready: WorkerReady = model
             .receive()
             .context("load the local model (see README setup)")?;
-        ensure!(!ready.is_empty(), "empty model identity");
-        model.identity = ready;
+        ensure!(!ready.identity.is_empty(), "empty model identity");
+        model.identity = ready.identity;
+        model.minimum_similarity = ready.minimum_similarity;
         Ok(model)
     }
 
@@ -79,11 +88,7 @@ impl Embedder for LocalModel {
     }
 
     fn minimum_similarity(&self) -> Option<f32> {
-        Some(if self.identity.starts_with("granite-r2-cls-512-v1:") {
-            0.86
-        } else {
-            0.78
-        })
+        self.minimum_similarity
     }
 
     fn encode(&mut self, kind: InputKind, texts: &[String]) -> Result<Vec<Vec<f32>>> {

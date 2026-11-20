@@ -230,18 +230,9 @@ fn prepare_corpus(dataset: &Dataset, root: &Path) -> Result<()> {
 
 fn main() -> Result<()> {
     let args: Vec<PathBuf> = env::args_os().skip(1).map(PathBuf::from).collect();
-    let [
-        dataset_path,
-        e5,
-        granite,
-        e5_large,
-        granite_311,
-        python,
-        granite_python,
-    ] = args.as_slice()
-    else {
+    let [dataset_path, e5, granite, e5_large, granite_311, python] = args.as_slice() else {
         anyhow::bail!(
-            "expected DATASET E5_SMALL_DIR GRANITE_97_DIR E5_LARGE_DIR GRANITE_311_DIR PYTHON GRANITE_PYTHON"
+            "expected DATASET E5_SMALL_DIR GRANITE_97_DIR E5_LARGE_DIR GRANITE_311_DIR PYTHON"
         );
     };
     let dataset: Dataset = serde_json::from_slice(&fs::read(dataset_path)?)?;
@@ -290,7 +281,7 @@ fn main() -> Result<()> {
         },
         ModelSpec {
             name: "Granite 311M",
-            python: granite_python,
+            python,
             weights: granite_311,
             dimensions: 768,
             external_weights: false,

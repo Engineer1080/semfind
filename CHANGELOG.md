@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.7
+
+- Select Granite 97M, Granite 311M, E5 Small, or E5 Large through `--model` or `SEMFIND_MODEL`. The downloader accepts the same choices.
+- Configure custom ONNX embeddings with `semfind-model.json`, including pooling, prefixes, token limit, output name, and an optional similarity cutoff.
+- Build a separate index when switching embedding models. The CLI checks the saved model identity before searching or writing vectors.
+
 ## 0.1.6
 
 - Use Granite Embedding 97M Multilingual R2 by default for downloads and new indexes. The CPU worker uses CLS pooling and a cosine similarity cutoff of 0.86.

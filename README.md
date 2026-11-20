@@ -46,6 +46,39 @@ semfind init
 
 If you previously set `SEMFIND_MODEL_DIR` to E5, unset it for these commands or point it to the Granite download directory. Keep the new index setting for later searches. Reapply any home exclusions, or use `semfind index /path/to/folder` to index selected directories.
 
+### Choose an embedding model
+
+The CLI and downloader accept `granite-97m`, `granite-311m`, `e5-small`, and `e5-large` with `--model` or `SEMFIND_MODEL`. Granite 97M is the default for new indexes. Compare the models in the [retrieval benchmark](benchmarks/retrieval/README.md).
+
+```bash
+export SEMFIND_MODEL=granite-311m
+export SEMFIND_INDEX_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/semfind/index-granite-311m"
+python scripts/download_model.py
+semfind init
+semfind 'How do I find files modified today?'
+```
+
+Keep the same model and index settings for subsequent searches. Use a new index directory when changing models or weights. Each index records the exact embedding identity and refuses to combine incompatible vectors.
+
+#### Use your own model
+
+Set `--model-dir` or `SEMFIND_MODEL_DIR` to a local directory. Use this setting by itself in place of `--model` and `SEMFIND_MODEL`. Supply `model.onnx`, a Hugging Face `tokenizer.json` with batch padding configured, and a `semfind-model.json` describing the encoder. For an ONNX export with external data, use a single sidecar named `model.onnx_data`.
+
+```json
+{
+  "pooling": "mean",
+  "output": "last_hidden_state",
+  "max_tokens": 512,
+  "query_prefix": "query: ",
+  "passage_prefix": "passage: ",
+  "minimum_similarity": 0.80
+}
+```
+
+`pooling` is required. Use `mean` for attention-masked mean pooling, `cls` for the first token, or `sentence` for an already pooled output of shape `[batch, dimensions]`. The other settings are optional. The default output name is `last_hidden_state`, the token limit is 512, prefixes are empty, and the similarity cutoff is disabled unless specified. The ONNX graph must run on CPU with batched INT64 inputs named `input_ids`, `attention_mask`, or `token_type_ids` and produce one vector of up to 4096 dimensions per input after pooling.
+
+Use a separate index for your model. Changes to the weights, tokenizer, or encoding settings require reindexing. You can adjust the similarity cutoff without reindexing.
+
 ## Try it
 
 On Linux, run `semfind init` after setup to index your home directory, desktop applications, and local command manuals. The first scan can take time on a large home directory or a system with many manuals.

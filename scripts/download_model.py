@@ -27,6 +27,34 @@ GRANITE_WEIGHTS = (
     "onnx/model.onnx", "68e592b160673d30250824c1116bc6ab33f70efb22b97c9e1d7ce1e69c1c9d70"
 )
 
+E5_LARGE_REVISION = "65606222138ddc487ab5c3bb2e772d8ce06b3ff5"
+E5_LARGE_URL = f"https://huggingface.co/intfloat/multilingual-e5-large/resolve/{E5_LARGE_REVISION}/onnx"
+E5_LARGE_SHA256 = {
+    "model.onnx": "bb5a52503a3ef35247f5b5ae6c473aaae60505dd3ffaef56d7b69e2f84683c05",
+    "model.onnx_data": "0cf1883fee81c63819a44e2ba0efa51d4043d9759685a4ebebbde97e0623d15c",
+    "tokenizer.json": "62c24cdc13d4c9952d63718d6c9fa4c287974249e16b7ade6d5a85e7bbb75626",
+}
+GRANITE_311_REVISION = "dba7b0ee9d789f330fecfb85df57699f9e7d9c42"
+GRANITE_311_URL = f"https://huggingface.co/ibm-granite/granite-embedding-311m-multilingual-r2/resolve/{GRANITE_311_REVISION}"
+GRANITE_311_FILES = {
+    "model.onnx": (
+        "onnx/model.onnx",
+        "75f9f258bf5013f5fe8a4dad61dd0fd16ac0cbaa7a106e3d3f41c2d04a42d541",
+    ),
+    "tokenizer.json": (
+        "tokenizer.json",
+        "0087c868b33bad550a78a08d19798cfd7f713cde4f020803b8f51f405503e15f",
+    ),
+}
+
+
+EXTRA_MODELS = {
+    "e5-large": (E5_LARGE_URL, "e5-large", {
+        name: (name, digest) for name, digest in E5_LARGE_SHA256.items()
+    }),
+    "granite-311m": (GRANITE_311_URL, "granite-311m-r2", GRANITE_311_FILES),
+}
+
 
 def checksum(path):
     with path.open("rb") as stream:
@@ -60,21 +88,29 @@ def main():
         default_data = Path.home() / ".local" / "share"
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, default=os.getenv("SEMFIND_MODEL_DIR"))
-    parser.add_argument("--model", choices=("granite-97m", "e5-small"))
+    models = ("granite-97m", "e5-small", *EXTRA_MODELS)
+    parser.add_argument("--model", choices=models)
     parser.add_argument("--variant", choices=E5_WEIGHTS, default="fp32")
     args = parser.parse_args()
-    model = args.model or ("e5-small" if args.variant == "int8" else "granite-97m")
+    model = args.model or os.getenv("SEMFIND_MODEL") or ("e5-small" if args.variant == "int8" else "granite-97m")
+    if model not in models:
+        parser.error(f"Unknown SEMFIND_MODEL: {model}")
+    if args.variant != "fp32" and model != "e5-small":
+        parser.error("Only E5 Small is available as INT8 in this downloader")
     default_directory = default_data / "semfind" / "model"
     if model == "granite-97m":
-        if args.variant != "fp32":
-            parser.error("Granite 97M is available as FP32 in this downloader")
         default_directory /= "granite-97m-r2"
-        base, tokenizer, weights = GRANITE_BASE, GRANITE_TOKENIZER, GRANITE_WEIGHTS
+        base = GRANITE_BASE
+        artifacts = {"tokenizer.json": GRANITE_TOKENIZER, "model.onnx": GRANITE_WEIGHTS}
+    elif model == "e5-small":
+        base = E5_BASE
+        artifacts = {"tokenizer.json": E5_TOKENIZER, "model.onnx": E5_WEIGHTS[args.variant]}
     else:
-        base, tokenizer, weights = E5_BASE, E5_TOKENIZER, E5_WEIGHTS[args.variant]
+        base, subdirectory, artifacts = EXTRA_MODELS[model]
+        default_directory /= subdirectory
     directory = args.directory if args.directory is not None else default_directory
     directory.mkdir(parents=True, exist_ok=True)
-    for filename, (upstream, digest) in (("tokenizer.json", tokenizer), ("model.onnx", weights)):
+    for filename, (upstream, digest) in artifacts.items():
         download(base, upstream, directory / filename, digest)
     print(f"Model ready in {directory}")
 

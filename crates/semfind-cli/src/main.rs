@@ -24,14 +24,44 @@ use ui::Messages;
 struct Cli {
     #[arg(long, env = "SEMFIND_INDEX_DIR", global = true)]
     index_dir: Option<PathBuf>,
-    #[arg(long, env = "SEMFIND_MODEL_DIR", global = true)]
+    /// Directory containing a local ONNX model and tokenizer.
+    #[arg(
+        long,
+        env = "SEMFIND_MODEL_DIR",
+        global = true,
+        conflicts_with = "model"
+    )]
     model_dir: Option<PathBuf>,
+    /// Select an embedding model installed by scripts/download_model.py.
+    #[arg(long, env = "SEMFIND_MODEL", value_enum, global = true)]
+    model: Option<ModelChoice>,
     #[arg(long, env = "SEMFIND_PYTHON", default_value = "python3", global = true)]
     python: PathBuf,
     #[command(subcommand)]
     command: Option<Command>,
     #[command(flatten)]
     search: Search,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum ModelChoice {
+    E5Small,
+    E5Large,
+    #[value(name = "granite-97m")]
+    Granite97M,
+    #[value(name = "granite-311m")]
+    Granite311M,
+}
+
+impl ModelChoice {
+    fn directory(self) -> &'static str {
+        match self {
+            Self::E5Small => "",
+            Self::E5Large => "e5-large",
+            Self::Granite97M => "granite-97m-r2",
+            Self::Granite311M => "granite-311m-r2",
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -276,21 +306,23 @@ fn run(cli: Cli, output: &mut impl Write, messages: &Messages) -> Result<()> {
             eprintln!("semfind: {line}");
         }
     }
-    let legacy_index = cli.model_dir.is_none()
-        && index
-            .embedding_model()?
-            .is_some_and(|identity| identity.starts_with("e5-mean-pool-v1:"));
+    let selected_model = match (cli.model, &cli.model_dir) {
+        (Some(choice), _) => choice,
+        (None, None)
+            if index
+                .embedding_model()?
+                .is_some_and(|identity| identity.starts_with("e5-mean-pool-v1:")) =>
+        {
+            ModelChoice::E5Small
+        }
+        _ => ModelChoice::Granite97M,
+    };
     let start_model = || {
         let directory = match &cli.model_dir {
             Some(path) => path.clone(),
-            None => {
-                let model_dir = data_dir(messages)?.join("model");
-                if legacy_index {
-                    model_dir
-                } else {
-                    model_dir.join("granite-97m-r2")
-                }
-            }
+            None => data_dir(messages)?
+                .join("model")
+                .join(selected_model.directory()),
         };
         LocalModel::start(&cli.python, &directory)
     };

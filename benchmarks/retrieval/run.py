@@ -231,32 +231,16 @@ def main():
     for name, (upstream, digest) in GRANITE_311_FILES.items():
         url = f"{GRANITE_311_URL}/{upstream}" if args.download_granite_311 else None
         require_artifact(args.granite_311 / name, digest, url)
-    with tempfile.TemporaryDirectory(prefix="semfind-granite-worker-") as scratch:
-        adapter = Path(scratch) / "granite-python"
-        adapter.write_text(
-            '#!/bin/sh\n'
-            '[ "$1" = "-I" ] && [ "$2" = "-u" ] && [ "$3" = "-c" ] && [ "$#" -eq 5 ] || exit 2\n'
-            'exec "$SEMFIND_BENCHMARK_PYTHON" -I -u "$SEMFIND_BENCHMARK_GRANITE" "$5"\n',
-            encoding="utf-8",
-        )
-        adapter.chmod(0o700)
-        env = {
-            **os.environ,
-            "SEMFIND_BENCHMARK_PYTHON": str(python),
-            "SEMFIND_BENCHMARK_GRANITE": str(BENCHMARK / "granite_worker.py"),
-        }
-        process = subprocess.run(
-            [
-                "cargo", "run", "--release", "--locked", "-p", "semfind-core", "--example",
-                "retrieval_benchmark", "--", BENCHMARK / "corpus.json", args.e5.absolute(),
-                args.granite.absolute(), args.e5_large.absolute(), args.granite_311.absolute(),
-                python, adapter,
-            ],
-            cwd=ROOT,
-            env=env,
-            check=True,
-            stdout=subprocess.PIPE,
-        )
+    process = subprocess.run(
+        [
+            "cargo", "run", "--release", "--locked", "-p", "semfind-core", "--example",
+            "retrieval_benchmark", "--", BENCHMARK / "corpus.json", args.e5.absolute(),
+            args.granite.absolute(), args.e5_large.absolute(), args.granite_311.absolute(), python,
+        ],
+        cwd=ROOT,
+        check=True,
+        stdout=subprocess.PIPE,
+    )
     result = json.loads(process.stdout)
     result["environment"] = metadata
     args.output.mkdir(parents=True, exist_ok=True)
