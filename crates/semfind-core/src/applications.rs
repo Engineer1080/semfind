@@ -1,6 +1,7 @@
+use crate::Language;
 use anyhow::{Context, Result};
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     env,
     fs::{self, OpenOptions},
     io::{self, Read},
@@ -11,7 +12,7 @@ use walkdir::WalkDir;
 pub(crate) struct Application {
     pub id: String,
     pub name: String,
-    pub text: String,
+    pub texts: Vec<String>,
 }
 
 pub(crate) fn discover(home: &Path) -> Result<Vec<Application>> {
@@ -50,9 +51,9 @@ pub(crate) fn discover(home: &Path) -> Result<Vec<Application>> {
                 continue;
             }
             if let Some(contents) = read_entry(path)?
-                && let Some((name, text)) = parse_entry(&contents, &desktops)
+                && let Some((name, texts)) = parse_entry(&contents, &desktops)
             {
-                applications.push(Application { id, name, text });
+                applications.push(Application { id, name, texts });
             }
         }
     }
@@ -83,7 +84,7 @@ fn read_entry(path: &Path) -> Result<Option<String>> {
         .flatten())
 }
 
-fn parse_entry(text: &str, desktops: &str) -> Option<(String, String)> {
+fn parse_entry(text: &str, desktops: &str) -> Option<(String, Vec<String>)> {
     let mut lines = text.lines().map(str::trim);
     lines.find(|line| *line == "[Desktop Entry]")?;
     let entries: Vec<_> = lines
@@ -116,25 +117,29 @@ fn parse_entry(text: &str, desktops: &str) -> Option<(String, String)> {
     if name.trim().is_empty() {
         return None;
     }
-    let text = entries
-        .iter()
-        .filter_map(|(key, value)| {
-            let (field, locale) = key.split_once('[').unwrap_or((key, ""));
-            let language = locale.split(['_', '@', ']']).next().unwrap_or_default();
-            (matches!(field, "Name" | "GenericName" | "Comment" | "Keywords")
-                && matches!(language, "" | "de" | "en"))
-            .then(|| {
-                let text = unescape(value);
-                if field == "Keywords" {
-                    text.replace(';', " ")
-                } else {
-                    text
-                }
-            })
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    Some((name, text))
+    let mut localized: BTreeMap<Language, Vec<String>> = BTreeMap::new();
+    for (key, value) in entries {
+        let (field, locale) = key.split_once('[').unwrap_or((key, "en"));
+        if !matches!(field, "Name" | "GenericName" | "Comment" | "Keywords") {
+            continue;
+        }
+        let Some(language) = Language::from_locale(locale.trim_end_matches(']')) else {
+            continue;
+        };
+        let mut text = unescape(value);
+        if field == "Keywords" {
+            text = text.replace(';', " ");
+        }
+        let parts = localized.entry(language).or_default();
+        if !text.trim().is_empty() && !parts.contains(&text) {
+            parts.push(text);
+        }
+    }
+    let texts = localized
+        .into_values()
+        .map(|parts| parts.join("\n"))
+        .collect();
+    Some((name, texts))
 }
 
 fn try_exec(program: &str) -> bool {

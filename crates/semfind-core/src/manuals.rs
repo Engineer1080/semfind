@@ -1,3 +1,4 @@
+use crate::Language;
 use anyhow::{Context, Result, ensure};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -25,6 +26,7 @@ pub(crate) struct LocalCommand {
 }
 
 pub(crate) fn discover() -> Result<Vec<LocalCommand>> {
+    let language = Language::current();
     let mut pages = BTreeMap::new();
     for root in manual_roots()? {
         let Some(entries) = read_dir(&root)? else {
@@ -35,17 +37,18 @@ pub(crate) fn discover() -> Result<Vec<LocalCommand>> {
         for entry in entries {
             let name = entry.file_name();
             let Some(name) = name.to_str() else { continue };
-            let language = name.split(['_', '.', '@']).next().unwrap_or_default();
-            if !(2..=3).contains(&language.len())
-                || !language.bytes().all(|byte| byte.is_ascii_lowercase())
+            let code = name.split(['_', '.', '@']).next().unwrap_or_default();
+            if !(2..=3).contains(&code.len())
+                || !code.bytes().all(|byte| byte.is_ascii_lowercase())
                 || !entry.file_type()?.is_dir()
             {
                 continue;
             }
-            let priority = match language {
-                "de" => 1,
-                "en" => 2,
-                _ => 3,
+            let priority = match Language::from_locale(name) {
+                Some(locale) if locale == language => 1,
+                Some(Language::De | Language::En) => 2,
+                Some(_) => 3,
+                None => 4,
             };
             collect_pages(&root, &root.join(name), priority, &mut pages)?;
         }
@@ -311,7 +314,7 @@ fn shell_argument(name: &str) -> String {
 }
 
 fn excerpt(source: &str) -> Option<String> {
-    let mut section = "";
+    let mut section = String::new();
     let mut name = Vec::new();
     let mut synopsis = Vec::new();
     let mut description = Vec::new();
@@ -321,16 +324,24 @@ fn excerpt(source: &str) -> Option<String> {
             .strip_prefix(".SH ")
             .or_else(|| row.strip_prefix(".Sh "))
         {
-            section = heading.trim_matches('"');
+            section = heading.trim_matches('"').to_uppercase();
             if !description.is_empty() {
                 break;
             }
             continue;
         }
-        let target = match section {
-            "NAME" | "Name" | "BEZEICHNUNG" => &mut name,
-            "SYNOPSIS" | "Synopsis" | "ÜBERSICHT" | "SYNTAX" | "AUFRUF" => &mut synopsis,
-            "DESCRIPTION" | "Description" | "BESCHREIBUNG" if description.len() < 4 => {
+        let target = match section.as_str() {
+            "NAME" | "BEZEICHNUNG" | "NOM" | "NOME" | "NOMBRE" | "ИМЯ" | "НАЗВАНИЕ" => {
+                &mut name
+            }
+            "SYNOPSIS" | "ÜBERSICHT" | "SYNTAX" | "AUFRUF" | "SINTAXIS" | "SINOPSIS"
+            | "SINTASSI" | "SINOPSE" | "SINTAXE" | "SYNTAXE" | "СИНТАКСИС" | "ОБЗОР" => {
+                &mut synopsis
+            }
+            "DESCRIPTION" | "BESCHREIBUNG" | "DESCRIPCIÓN" | "DESCRIÇÃO" | "DESCRIZIONE"
+            | "ОПИСАНИЕ"
+                if description.len() < 4 =>
+            {
                 &mut description
             }
             _ => continue,
@@ -417,4 +428,28 @@ fn inline_text(text: &str) -> String {
         .map(|word| word.trim_matches('"'))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::excerpt;
+
+    #[test]
+    fn extracts_localized_manual_sections() {
+        for (name, synopsis, description) in [
+            ("NOM", "SYNTAXE", "DESCRIPTION"),
+            ("NOME", "SINOPSE", "DESCRIÇÃO"),
+            ("NOMBRE", "SINOPSIS", "DESCRIPCIÓN"),
+            ("NOME", "SINTASSI", "DESCRIZIONE"),
+            ("ИМЯ", "СИНТАКСИС", "ОПИСАНИЕ"),
+        ] {
+            let source = format!(
+                ".SH \"{name}\"\nprobe \\- name\n.SH \"{synopsis}\"\n.B probe\nFILE\n.SH \"{description}\"\nDetail"
+            );
+            assert_eq!(
+                excerpt(&source).as_deref(),
+                Some("probe - name\nprobe FILE\nDetail")
+            );
+        }
+    }
 }

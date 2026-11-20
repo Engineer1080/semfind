@@ -5,6 +5,7 @@ use crate::{
     files::{self, FileKind},
     manuals,
     model::{Embedder, InputKind, normalized},
+    translations::catalog_texts,
 };
 use anyhow::{Context, Result, ensure};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
@@ -368,7 +369,7 @@ fn source_state(conn: &Connection, key: &str) -> Result<Option<(i64, Vec<u8>)>> 
 fn write_source(
     tx: &Transaction<'_>,
     source: Source<'_>,
-    text: Option<&str>,
+    texts: &[&str],
     digest: &[u8],
     model: &mut impl Embedder,
 ) -> Result<i64> {
@@ -393,11 +394,11 @@ fn write_source(
         |row| row.get(0),
     )?;
     tx.execute("DELETE FROM chunks WHERE source = ?1", [id])?;
-    let Some(text) = text else {
+    if texts.is_empty() {
         store_chunk(tx, id, &source, "", &[])?;
         return Ok(id);
-    };
-    let mut parts = files::chunks(text).peekable();
+    }
+    let mut parts = texts.iter().flat_map(|text| files::chunks(text)).peekable();
     if parts.peek().is_none() {
         write_chunks(tx, id, &source, &[""], model)?;
     }
@@ -483,7 +484,13 @@ fn synchronize_catalog(
     let mut keep = Vec::new();
     for setting in SETTINGS {
         let text = format!("{} {}", setting.description, setting.synonyms);
-        let digest = Sha256::digest(format!("v1\n{}\n{}\n{text}", setting.title, setting.group));
+        let texts = translated_passages(setting.id, &text);
+        let digest = Sha256::digest(format!(
+            "setting-v2\n{}\n{}\n{}",
+            setting.title,
+            setting.group,
+            texts.join("\0")
+        ));
         keep.push(sync_catalog_entry(
             tx,
             Source {
@@ -497,7 +504,7 @@ fn synchronize_catalog(
                 distro: None,
                 example: None,
             },
-            Some(&text),
+            &texts,
             &digest,
             model,
             report,
@@ -514,7 +521,12 @@ fn synchronize_applications(
 ) -> Result<()> {
     let mut keep = Vec::new();
     for app in applications {
-        let digest = Sha256::digest(format!("application-v1\n{}\n{}", app.name, app.text));
+        let texts: Vec<_> = app.texts.iter().map(String::as_str).collect();
+        let digest = Sha256::digest(format!(
+            "application-v2\n{}\n{}",
+            app.name,
+            texts.join("\0")
+        ));
         keep.push(sync_catalog_entry(
             tx,
             Source {
@@ -528,7 +540,7 @@ fn synchronize_applications(
                 distro: None,
                 example: None,
             },
-            Some(&app.text),
+            &texts,
             &digest,
             model,
             report,
@@ -544,11 +556,12 @@ fn synchronize_commands(
 ) -> Result<()> {
     let mut keep = Vec::new();
     for command in COMMANDS {
+        let texts = translated_passages(command.id, command.description);
         let digest = Sha256::digest(format!(
-            "command-v1\n{}\n{}\n{}\n{}",
+            "command-v2\n{}\n{}\n{}\n{}",
             command.title,
             command.distro.as_str(),
-            command.description,
+            texts.join("\0"),
             command.example
         ));
         keep.push(sync_catalog_entry(
@@ -564,13 +577,19 @@ fn synchronize_commands(
                 distro: Some(command.distro),
                 example: Some(command.example),
             },
-            Some(command.description),
+            &texts,
             &digest,
             model,
             report,
         )?);
     }
     remove_missing_sources(tx, "command", false, &keep, report)
+}
+
+fn translated_passages<'a>(id: &str, primary: &'a str) -> Vec<&'a str> {
+    std::iter::once(primary)
+        .chain(catalog_texts(id).iter().copied())
+        .collect()
 }
 
 fn synchronize_local_commands(
@@ -601,7 +620,7 @@ fn synchronize_local_commands(
                 distro: Some(distro),
                 example: command.example.as_deref(),
             },
-            command.text.as_deref(),
+            command.text.as_deref().as_slice(),
             &digest,
             model,
             report,
@@ -613,7 +632,7 @@ fn synchronize_local_commands(
 fn sync_catalog_entry(
     tx: &Transaction<'_>,
     source: Source<'_>,
-    text: Option<&str>,
+    texts: &[&str],
     digest: &[u8],
     model: &mut impl Embedder,
     report: &mut IndexReport,
@@ -622,7 +641,7 @@ fn sync_catalog_entry(
         report.unchanged += 1;
         return Ok(id);
     }
-    let id = write_source(tx, source, text, digest, model)?;
+    let id = write_source(tx, source, texts, digest, model)?;
     report.written += 1;
     Ok(id)
 }
@@ -752,7 +771,7 @@ fn synchronize_files(
                     distro: None,
                     example: None,
                 },
-                text.as_deref(),
+                text.as_deref().as_slice(),
                 &digest,
                 model,
             )?;

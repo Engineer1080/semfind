@@ -17,7 +17,7 @@ flowchart LR
 
 `Index::initialize_home` reconciles the home directory, desktop applications, and local commands in the same transaction. Application entries are keyed by desktop file ID and discovered in XDG preference order, with the user directory first. Application embeddings use the desktop name, description, and keywords.
 
-Command embeddings use the command title and bilingual description. Each entry also stores an example and a distribution family. The CLI detects the family at search time so an index can contain both Debian and Arch variants. The distribution filter applies before ranking.
+Built-in command and settings entries keep translated descriptions in separate passages under a shared source ID. Commands also store an example and a distribution family. The CLI detects the family at search time so an index can contain both Debian and Arch variants. The distribution filter applies before ranking.
 
 `init` and `index --manpages` refresh locally installed command records. The scan extracts bounded excerpts from command manual sections and records each manual's name and section. Executable names without a manual use lexical-only records. The built-in and local command entries reconcile independently.
 

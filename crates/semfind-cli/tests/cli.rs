@@ -8,7 +8,7 @@ use std::{
 
 fn cli(index: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_semfind"));
-    command.arg("--index-dir").arg(index);
+    command.arg("--index-dir").arg(index).env("LC_ALL", "C");
     command
 }
 
@@ -55,6 +55,104 @@ fn status_json_and_usage_exit_codes() -> Result<()> {
             .code(),
         Some(1)
     );
+    Ok(())
+}
+
+#[test]
+fn terminal_messages_follow_locale_without_changing_json() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let index = temp.path().join("index");
+    for (locale, usage, description, files) in [
+        ("de_DE.UTF-8", "Aufruf:", "Lokale Datei-", "Dateien:"),
+        ("ru_RU.UTF-8", "Использование:", "Локальный поиск", "Файлы:"),
+        ("pt_BR.UTF-8", "Uso:", "Busca local", "Arquivos:"),
+        (
+            "fr_CA.UTF-8",
+            "Utilisation:",
+            "Recherche locale",
+            "Fichiers:",
+        ),
+        ("es_MX.UTF-8", "Uso:", "Búsqueda local", "Archivos:"),
+        ("it_IT.UTF-8", "Utilizzo:", "Ricerca locale", "File:"),
+    ] {
+        let command = || {
+            let mut command = cli(&index);
+            command.env("LC_ALL", locale).env_remove("LANGUAGE");
+            command
+        };
+        let help = String::from_utf8(success(command().arg("--help").output()?)?)?;
+        assert!(help.contains(usage) && help.contains(description), "{help}");
+        let status = command().arg("status").output()?;
+        if cfg!(target_os = "linux") {
+            let hint = String::from_utf8_lossy(&status.stderr);
+            assert!(
+                hint.contains("`semfind init`") && !has_init_hint(&status),
+                "{hint}"
+            );
+        }
+        let text = String::from_utf8(success(status)?)?;
+        assert!(text.starts_with(files), "{text}");
+        let status = success(command().args(["status", "--json"]).output()?)?;
+        let status: serde_json::Value = serde_json::from_slice(&status)?;
+        assert_eq!(status["files"], 0);
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires a local model and Python environment"]
+fn real_model_searches_all_added_catalog_languages() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let index = temp.path().join("index");
+    success(cli(&index).arg("index").output()?)?;
+    for (install, brighter) in [
+        (
+            "Как установить новый пакет из репозитория?",
+            "Как увеличить яркость экрана?",
+        ),
+        (
+            "Como instalo um novo pacote?",
+            "Como posso aumentar o brilho da tela?",
+        ),
+        (
+            "Comment installer un nouveau paquet ?",
+            "Comment augmenter la luminosité de mon écran ?",
+        ),
+        (
+            "¿Cómo instalo un paquete nuevo?",
+            "¿Cómo subo el brillo de la pantalla?",
+        ),
+        (
+            "Come installo un nuovo pacchetto?",
+            "Come aumento la luminosità dello schermo?",
+        ),
+    ] {
+        for (query, category, expected) in [
+            (install, "command", "command.packages.install.debian"),
+            (brighter, "setting", "display.brightness"),
+        ] {
+            let output = success(
+                cli(&index)
+                    .args([
+                        query,
+                        "--category",
+                        category,
+                        "--distro",
+                        "debian",
+                        "--limit",
+                        "1",
+                        "--json",
+                    ])
+                    .output()?,
+            )?;
+            let hits: Vec<Hit> = serde_json::from_slice(&output)?;
+            assert_eq!(
+                hits.first().map(|hit| hit.id.as_str()),
+                Some(expected),
+                "{query}: {hits:?}"
+            );
+        }
+    }
     Ok(())
 }
 
@@ -241,7 +339,7 @@ fn real_model_init_indexes_home_desktop_applications_and_manuals() -> Result<()>
     )?;
     fs::write(
         user_apps.join("viewer.desktop"),
-        "[Desktop Entry]\nType=Application\nName=My Viewer\nGenericName[de]=Bildbetrachter\nKeywords=screenshot;photo;\nOnlyShowIn=COSMIC;\n",
+        "[Desktop Entry]\nType=Application\nName=My Viewer\nGenericName[de]=Bildbetrachter\nGenericName[es_MX]=Visor de imágenes\nKeywords=screenshot;photo;\nOnlyShowIn=COSMIC;\n",
     )?;
     fs::write(
         system_apps.join("hidden.desktop"),
@@ -298,6 +396,16 @@ fn real_model_init_indexes_home_desktop_applications_and_manuals() -> Result<()>
     assert_eq!(hits[0].category, Category::Application);
     assert_eq!(hits[0].id, "viewer.desktop");
     assert_eq!(hits[0].title, "My Viewer");
+    let spanish: Vec<Hit> = serde_json::from_slice(&run(&[
+        "Visor de imágenes",
+        "--category",
+        "application",
+        "--json",
+    ])?)?;
+    assert_eq!(
+        spanish.first().map(|hit| hit.id.as_str()),
+        Some("viewer.desktop")
+    );
     let manuals: Vec<Hit> = serde_json::from_slice(&run(&[
         "init-example",
         "--category",

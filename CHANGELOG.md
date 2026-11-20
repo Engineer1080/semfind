@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.5
+
+- Localized terminal help, setup reminders, and status and result labels in English, German, Russian, Portuguese, French, Spanish, and Italian. semfind selects the language from the system locale and uses English as the fallback. Command names, options, and JSON fields use the same identifiers across locales.
+- Added Russian, Portuguese, French, Spanish, and Italian search passages to the built-in Linux command and COSMIC settings catalogs. Run `semfind index` to add them to an existing index.
+- `semfind init` picks up available desktop entry translations in the supported languages. Manual indexing recognizes localized section headings and prefers the configured language for translated excerpts.
+
 ## 0.1.4
 
 - Added a searchable catalog of 31 Linux command entries with German and English descriptions and examples. Package-management results select Debian or Arch variants using the local distribution or the `--distro` override.

@@ -1,14 +1,14 @@
 # semfind
 
-An experimental, offline search engine for Linux. Use everyday German or English to find files in selected folders, desktop applications, COSMIC settings, and Linux commands.
+An experimental, offline search engine for Linux. Use everyday language to find files in selected folders, desktop applications, COSMIC settings, and Linux commands.
 
 Linux filename search helps when you know what a file is called. Full-text search helps when you remember its wording. semfind also compares the meaning of a query with document passages. A German question can retrieve an English document, and an exact filename, settings ID, or error code still takes priority.
 
 ## What works
 
-- Manual indexing of selected directories and a curated, bilingual COSMIC settings catalog.
+- Manual indexing of selected directories and a curated, multilingual COSMIC settings catalog.
 - On Linux, `semfind init` indexes your home directory, registered desktop applications, local command manuals, and the built-in catalogs.
-- A built-in German and English Linux command catalog with runnable examples and Debian and Arch package-management variants.
+- A multilingual Linux command catalog with runnable examples and Debian and Arch package-management variants.
 - Indexing of installed manual pages and executable filenames from `PATH` through `semfind init` or `semfind index --manpages`.
 - Search across UTF-8 text, Markdown, logs, CSV, reStructuredText, and PDFs with a text layer.
 - Local multilingual E5 embeddings, SQLite FTS5, and hybrid ranking with one result per indexed source.
@@ -56,6 +56,17 @@ semfind "Mein Bildschirm ist zu dunkel" --category settings
 semfind "E-0042" --type log --json
 semfind status --json
 ```
+
+### Languages
+
+Terminal help, setup reminders, and status labels are available in English, German, Russian, Portuguese, French, Spanish, and Italian. semfind uses the configured message locale. It reads `LC_ALL`, `LC_MESSAGES`, and `LANG` in that order, with `LANGUAGE` preferences for non-`C` locales. The command names, flags, and JSON fields use stable identifiers.
+
+```bash
+LC_ALL=fr_FR.UTF-8 semfind --help
+semfind "Comment installer un nouveau paquet ?" --category command
+```
+
+The built-in command and COSMIC catalogs index descriptions in all seven languages. Run `semfind index` to add the translations to an existing catalog. Run `semfind init` to refresh translated desktop application metadata and local manuals when available. The five additional languages were selected from voluntarily reported desktop locales, grouped by language. [Linux Hardware Trends](https://github.com/linuxhw/Trends/blob/master/Desktop/README.md#os-lang)
 
 ### Find Linux commands
 

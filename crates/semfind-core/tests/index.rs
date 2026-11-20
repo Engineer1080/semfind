@@ -133,6 +133,7 @@ fn rescans_skip_unchanged_passages_and_roll_back_failed_changes() -> Result<()> 
     fixture(&root, "z.txt", "cold storage")?;
     index.synchronize(Some(&root), &Default::default(), &mut model)?;
     let count = model.passages;
+    let catalog_chunks = index.status()?.chunks - 2;
     let report = index.synchronize(Some(&root), &Default::default(), &mut model)?;
     assert_eq!(count, model.passages);
     assert_eq!(
@@ -159,7 +160,7 @@ fn rescans_skip_unchanged_passages_and_roll_back_failed_changes() -> Result<()> 
     assert!(index.remove_root(&root)?);
     let status = index.status()?;
     assert_eq!((status.files, status.settings), (0, 5));
-    assert_eq!(status.chunks, status.settings + status.commands);
+    assert_eq!(status.chunks, catalog_chunks);
     Ok(())
 }
 
@@ -208,6 +209,7 @@ fn file_kind_filters_list_multiple_formats_and_search_media_names() -> Result<()
     let (temp, mut index, root, mut model) = new_fixture()?;
     fixture(&root, "garden.txt", "Summer flowers")?;
     index.synchronize(Some(&root), &IndexOptions::default(), &mut model)?;
+    let original_chunks = index.status()?.chunks;
     drop(index);
     let index_dir = temp.path().join("index");
     // Emulate a pre-command database containing text and settings.
@@ -223,6 +225,7 @@ fn file_kind_filters_list_multiple_formats_and_search_media_names() -> Result<()
     let mut index = Index::open(&index_dir)?;
     assert_eq!(index.status()?.files, 1);
     assert_eq!(index.status()?.commands, 0);
+    let missing_chunks = original_chunks - index.status()?.chunks;
     fixture(&root, "garden.JPG", "hiddenmarker")?;
     fixture(&root, "garden.PNG", "other image bytes")?;
     fixture(&root, "clips/garden.webm", "video bytes")?;
@@ -235,8 +238,8 @@ fn file_kind_filters_list_multiple_formats_and_search_media_names() -> Result<()
     index.synchronize(Some(&root), &IndexOptions::default(), &mut model)?;
     let status = index.status()?;
     assert_eq!(status.files, 5);
-    assert_eq!(status.chunks, 6 + status.commands);
-    let encoded = previously_encoded + usize::try_from(status.commands)?;
+    assert_eq!(status.chunks, original_chunks);
+    let encoded = previously_encoded + usize::try_from(missing_chunks)?;
     assert_eq!(model.passages, encoded);
     drop(index);
     let mut index = Index::open(&temp.path().join("index"))?;

@@ -1,9 +1,11 @@
 use anyhow::{Context, Result, ensure};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use semfind_core::{
-    Category, Distro, FileKind, Index, IndexOptions, IndexReport, LocalModel, SearchOptions,
+    Category, Distro, FileKind, Index, IndexOptions, IndexReport, Language, LocalModel,
+    SearchOptions,
 };
 mod distro;
+mod ui;
 use distro::DistroFilter;
 use std::{
     env,
@@ -11,6 +13,7 @@ use std::{
     path::{Path, PathBuf},
     process::ExitCode,
 };
+use ui::Messages;
 
 #[derive(Parser)]
 #[command(
@@ -134,29 +137,38 @@ impl From<Filter> for Category {
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let language = Language::current();
+    let messages = Messages::for_language(language);
+    let mut command = localized_help(messages);
+    let matches = command
+        .try_get_matches_from_mut(env::args_os())
+        .unwrap_or_else(|error| {
+            if language != Language::En && error.kind() == clap::error::ErrorKind::DisplayHelp {
+                print_localized_help(error, messages);
+            }
+            error.exit()
+        });
+    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
     if cli.command.is_none() && cli.search.query.is_none() && cli.search.file_kind.is_none() {
-        use clap::CommandFactory;
-        Cli::command()
+        command
             .error(
                 clap::error::ErrorKind::MissingRequiredArgument,
-                "provide a query, --kind or a subcommand",
+                messages.command_required,
             )
             .exit();
     }
     if matches!(&cli.command, Some(Command::Search(search)) if search.query.is_none() && search.file_kind.is_none())
     {
-        use clap::CommandFactory;
-        Cli::command()
+        command
             .error(
                 clap::error::ErrorKind::MissingRequiredArgument,
-                "provide a query or --kind",
+                messages.query_required,
             )
             .exit();
     }
     let stdout = io::stdout();
     let mut output = io::BufWriter::new(stdout.lock());
-    match run(cli, &mut output).and_then(|()| Ok(output.flush()?)) {
+    match run(cli, &mut output, messages).and_then(|()| Ok(output.flush()?)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error)
             if error
@@ -172,25 +184,102 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(cli: Cli, output: &mut impl Write) -> Result<()> {
+fn localized_help(messages: &Messages) -> clap::Command {
+    apply_search_help(Cli::command().about(messages.about), messages)
+        .mut_subcommand("init", |sub| {
+            sub.about(messages.init)
+                .mut_arg("exclude", |arg| arg.help(messages.exclude))
+                .mut_arg("clear_excludes", |arg| arg.help(messages.clear_excludes))
+        })
+        .mut_subcommand("index", |sub| {
+            sub.about(messages.index)
+                .mut_arg("exclude", |arg| arg.help(messages.exclude))
+                .mut_arg("clear_excludes", |arg| arg.help(messages.clear_excludes))
+                .mut_arg("manpages", |arg| arg.help(messages.manpages))
+        })
+        .mut_subcommand("status", |sub| {
+            sub.about(messages.status)
+                .mut_arg("json", |arg| arg.help(messages.json))
+        })
+        .mut_subcommand("unindex", |sub| sub.about(messages.unindex))
+        .mut_subcommand("search", |sub| {
+            apply_search_help(sub.about(messages.search), messages)
+        })
+}
+
+fn apply_search_help(command: clap::Command, messages: &Messages) -> clap::Command {
+    [
+        ("query", messages.query),
+        ("file_kind", messages.kind),
+        ("distro", messages.distro),
+        ("json", messages.json),
+        ("category", messages.category),
+        ("path", messages.path),
+        ("extension", messages.extension),
+        ("limit", messages.limit),
+    ]
+    .into_iter()
+    .fold(command, |cmd, (id, text)| {
+        cmd.mut_arg(id, |arg| arg.help(text))
+    })
+}
+
+fn print_localized_help(error: clap::Error, messages: &Messages) -> ! {
+    let mut help = error.to_string();
+    let [
+        usage,
+        commands,
+        arguments,
+        options,
+        print_help,
+        print_version,
+        help_command,
+    ] = messages.help_headers;
+    for (original, localized) in [
+        ("Usage", usage),
+        ("Commands", commands),
+        ("Arguments", arguments),
+        ("Options", options),
+    ] {
+        help = help.replace(&format!("\n{original}:"), &format!("\n{localized}:"));
+    }
+    for (original, localized) in [
+        (
+            "Print this message or the help of the given subcommand(s)",
+            help_command,
+        ),
+        ("Print help", print_help),
+        ("Print version", print_version),
+    ] {
+        help = help.replace(original, localized);
+    }
+    let status = match io::stdout().lock().write_all(help.as_bytes()) {
+        Ok(()) => 0,
+        Err(error) if error.kind() == io::ErrorKind::BrokenPipe => 0,
+        Err(_) => 1,
+    };
+    std::process::exit(status)
+}
+
+fn run(cli: Cli, output: &mut impl Write, messages: &Messages) -> Result<()> {
     let dir = match cli.index_dir {
         Some(path) => path,
-        None => data_dir()?.join("index"),
+        None => data_dir(messages)?.join("index"),
     };
-    let mut index = Index::open(&dir).with_context(|| format!("open index {}", dir.display()))?;
+    let mut index =
+        Index::open(&dir).with_context(|| format!("{} {}", messages.open_index, dir.display()))?;
     if cfg!(target_os = "linux")
         && !matches!(cli.command, Some(Command::Init { .. }))
         && !index.is_initialized()?
     {
-        eprintln!(
-            "semfind: Find documents by what you remember, apps by what they do, and Linux commands by describing the task.\n\
-             semfind: Run `semfind init` once to set up local search."
-        );
+        for line in messages.hint {
+            eprintln!("semfind: {line}");
+        }
     }
     let start_model = || {
         let directory = match &cli.model_dir {
             Some(path) => path.clone(),
-            None => data_dir()?.join("model"),
+            None => data_dir(messages)?.join("model"),
         };
         LocalModel::start(&cli.python, &directory)
     };
@@ -200,28 +289,37 @@ fn run(cli: Cli, output: &mut impl Write) -> Result<()> {
             if json {
                 return print_json(output, &status);
             }
+            let [
+                files,
+                settings,
+                applications,
+                commands,
+                passages,
+                root_label,
+            ] = messages.status_labels;
             writeln!(
                 output,
-                "Files: {} | Settings: {} | Applications: {} | Commands: {} | Passages: {}",
+                "{files}: {} | {settings}: {} | {applications}: {} | {commands}: {} | {passages}: {}",
                 status.files, status.settings, status.applications, status.commands, status.chunks
             )?;
             for root in status.roots {
-                writeln!(output, "Root: {}", root.display())?;
+                writeln!(output, "{root_label}: {}", root.display())?;
             }
         }
         Some(Command::Unindex { root }) => {
             ensure!(
                 index.remove_root(&root)?,
-                "directory is not registered: {}",
+                "{}: {}",
+                messages.root_missing,
                 root.display()
             );
-            writeln!(output, "Removed {}", root.display())?;
+            writeln!(output, "{} {}", messages.root_removed, root.display())?;
         }
         Some(Command::Init {
             exclude,
             clear_excludes,
         }) => {
-            let home = env::var_os("HOME").context("HOME is required for init")?;
+            let home = env::var_os("HOME").context(messages.home_required)?;
             let report = index.initialize_home(
                 Path::new(&home),
                 &IndexOptions {
@@ -229,7 +327,7 @@ fn run(cli: Cli, output: &mut impl Write) -> Result<()> {
                 },
                 &mut start_model()?,
             )?;
-            print_index_report(output, &report)?;
+            print_index_report(output, &report, messages)?;
         }
         Some(Command::Index {
             root,
@@ -251,21 +349,26 @@ fn run(cli: Cli, output: &mut impl Write) -> Result<()> {
             } else {
                 index.synchronize(root.as_deref(), &options, &mut model)?
             };
-            print_index_report(output, &report)?;
+            print_index_report(output, &report, messages)?;
         }
-        Some(Command::Search(search)) => run_search(&index, search, start_model, output)?,
-        None => run_search(&index, cli.search, start_model, output)?,
+        Some(Command::Search(search)) => run_search(&index, search, start_model, output, messages)?,
+        None => run_search(&index, cli.search, start_model, output, messages)?,
     }
     Ok(())
 }
 
-fn print_index_report(output: &mut impl Write, report: &IndexReport) -> Result<()> {
+fn print_index_report(
+    output: &mut impl Write,
+    report: &IndexReport,
+    messages: &Messages,
+) -> Result<()> {
+    let [written, unchanged, removed, skipped] = messages.report_labels;
     for warning in &report.warnings {
-        eprintln!("semfind: skipped {warning}");
+        eprintln!("semfind: {skipped}: {warning}");
     }
     writeln!(
         output,
-        "Written: {} | Unchanged: {} | Removed: {} | Skipped: {}",
+        "{written}: {} | {unchanged}: {} | {removed}: {} | {skipped}: {}",
         report.written, report.unchanged, report.removed, report.skipped
     )?;
     Ok(())
@@ -276,6 +379,7 @@ fn run_search(
     search: Search,
     start_model: impl FnOnce() -> Result<LocalModel>,
     output: &mut impl Write,
+    messages: &Messages,
 ) -> Result<()> {
     let local_distro = Distro::current();
     let selected_distro = search.distro.map(Into::into).unwrap_or(local_distro);
@@ -296,9 +400,10 @@ fn run_search(
         return print_json(output, &hits);
     }
     for hit in hits {
+        let category = messages.category(hit.category);
         let label = hit.distro.map_or_else(
-            || hit.category.as_str().to_owned(),
-            |family| format!("{}/{}", hit.category.as_str(), family.as_str()),
+            || category.to_owned(),
+            |family| format!("{category}/{}", family.as_str()),
         );
         writeln!(
             output,
@@ -337,12 +442,12 @@ fn print_json(output: &mut impl Write, data: &impl serde::Serialize) -> Result<(
     Ok(())
 }
 
-fn data_dir() -> Result<PathBuf> {
+fn data_dir(messages: &Messages) -> Result<PathBuf> {
     let base = env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
         .or_else(|| env::var_os("HOME").map(|home| Path::new(&home).join(".local/share")))
         .or_else(|| env::var_os("LOCALAPPDATA").map(PathBuf::from))
-        .context("cannot find a user data directory (set XDG_DATA_HOME)")?;
+        .context(messages.data_dir_missing)?;
     Ok(base.join("semfind"))
 }
