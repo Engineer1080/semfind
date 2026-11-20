@@ -11,7 +11,7 @@ Linux filename search helps when you know what a file is called. Full-text searc
 - A multilingual Linux command catalog with runnable examples and Debian and Arch package-management variants.
 - Indexing of installed manual pages and executable filenames from `PATH` through `semfind init` or `semfind index --manpages`.
 - Search across UTF-8 text, Markdown, logs, CSV, reStructuredText, and PDFs with a text layer.
-- Local multilingual E5 embeddings, SQLite FTS5, and hybrid ranking with one result per indexed source.
+- Local Granite Embedding 97M Multilingual R2 embeddings, SQLite FTS5, and hybrid ranking with one result per indexed source.
 - Filters for folder, file extension, file kind (text, image, video), and result category. JSON for scripting.
 - Incremental rescans that recalculate embeddings only for changed content. Saved directory exclusions and manual index removal.
 
@@ -32,7 +32,19 @@ export PATH="$HOME/.cargo/bin:$PATH"
 export SEMFIND_PYTHON="$VIRTUAL_ENV/bin/python"
 ```
 
-Dependencies and the model are downloaded during setup. The default FP32 model and tokenizer take about 487 MB on disk. The downloader verifies SHA-256 checksums against a fixed model revision. Subsequent indexing and search read the model from disk. For a smaller download, the upstream INT8 export is available with `--variant int8` for compatible CPUs. Use a separate model and index directory when changing variants.
+Dependencies and the model are downloaded during setup. The default Granite FP32 model and tokenizer take about 415 MB on disk. The downloader verifies SHA-256 checksums against a fixed model revision. Subsequent indexing and search read the model from disk. Use `python scripts/download_model.py --model e5-small` to download E5 Small, optionally with `--variant int8` for compatible CPUs. Use a separate model and index directory when changing variants.
+
+### Upgrade an existing E5 installation
+
+Existing E5 indexes still use their original model from the previous default model directory. Explicit `--model-dir` and `SEMFIND_MODEL_DIR` settings still take priority. To switch to Granite, download it and build a fresh index in a separate directory.
+
+```bash
+python scripts/download_model.py
+export SEMFIND_INDEX_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/semfind/index-granite"
+semfind init
+```
+
+If you previously set `SEMFIND_MODEL_DIR` to E5, unset it for these commands or point it to the Granite download directory. Keep the new index setting for later searches. Reapply any home exclusions, or use `semfind index /path/to/folder` to index selected directories.
 
 ## Try it
 
@@ -115,12 +127,12 @@ Local data defaults to `${XDG_DATA_HOME:-$HOME/.local/share}/semfind`. Set `SEMF
 
 ## Architecture and limits
 
-The Rust CLI calls the same library that future clients will use. The core stages reads, extracts text, and stores passages and vectors in a single SQLite transaction. A local CPU worker runs the E5 model through ONNX Runtime. Query-time cosine similarity and FTS5's BM25 rankings are fused with Reciprocal Rank Fusion. See [architecture](docs/architecture.md) and [privacy](docs/privacy.md).
+The Rust CLI calls the same library that future clients will use. The core stages reads, extracts text, and stores passages and vectors in a single SQLite transaction. A local CPU worker runs the embedding model through ONNX Runtime. Query-time cosine similarity and FTS5's BM25 rankings are fused with Reciprocal Rank Fusion. See [architecture](docs/architecture.md) and [privacy](docs/privacy.md).
 
-The MVP is intended for small collections. Exact cosine search scales linearly with the number of passages. The local E5 model uses a minimum cosine similarity for semantic hits. Literal and full-text matching still apply at any similarity. Scanned PDFs require a text layer. Settings results carry catalog metadata. A desktop UI, launching apps from results, a background service, and file history are roadmap items. See [roadmap](docs/roadmap.md) and [COSMIC research](integrations/cosmic/README.md).
+The MVP is intended for small collections. Exact cosine search scales linearly with the number of passages. Semantic hits use a model-specific cosine similarity cutoff. Literal and full-text matching still apply at any similarity. Scanned PDFs require a text layer. Settings results carry catalog metadata. A desktop UI, launching apps from results, a background service, and file history are roadmap items. See [roadmap](docs/roadmap.md) and [COSMIC research](integrations/cosmic/README.md).
 
 ## Contribute
 
 Run `cargo fmt --all --check`, `cargo clippy --locked --workspace --all-targets -- -D warnings`, and `cargo test --locked --workspace`. See [contributing](CONTRIBUTING.md) for the real-model test and review guidelines.
 
-Code is [Apache-2.0 licensed](LICENSE). The [upstream model](https://huggingface.co/intfloat/multilingual-e5-small) is MIT-licensed and downloaded separately. See [dependencies and model provenance](docs/dependencies.md).
+Code is [Apache-2.0 licensed](LICENSE). The [default Granite model](https://huggingface.co/ibm-granite/granite-embedding-97m-multilingual-r2) is also Apache-2.0 licensed and downloaded separately. See [dependencies and model provenance](docs/dependencies.md).

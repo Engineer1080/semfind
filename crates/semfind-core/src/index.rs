@@ -150,6 +150,11 @@ impl Index {
         })
     }
 
+    /// Return the identity of the embedding model that populated this index.
+    pub fn embedding_model(&self) -> Result<Option<String>> {
+        model_identity(&self.conn)
+    }
+
     /// Synchronize the built-in catalogs and optionally a selected directory.
     /// Successful runs commit both text and vectors atomically.
     pub fn synchronize(

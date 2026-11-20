@@ -7,7 +7,7 @@ flowchart LR
     Catalog[COSMIC catalog] --> Core
     Commands[Built-in Linux command catalog] --> Core
     Apps[XDG desktop entries] --> Core
-    Core -->|Local pipes| Worker[E5 / ONNX Runtime]
+    Core -->|Local pipes| Worker[Embeddings / ONNX Runtime]
     Core --> DB[(SQLite / FTS5 + vectors)]
 ```
 
@@ -21,11 +21,11 @@ Built-in command and settings entries keep translated descriptions in separate p
 
 `init` and `index --manpages` refresh locally installed command records. The scan extracts bounded excerpts from command manual sections and records each manual's name and section. Executable names without a manual use lexical-only records. The built-in and local command entries reconcile independently.
 
-Extracted text is broken at nearby word boundaries, up to 640 Unicode characters with about 80 characters of overlap. Embeddings include a clipped title and use E5's `query:` and `passage:` prefixes. Python tokenizes to at most 512 tokens, runs CPU inference and mean-pools unmasked output tokens. Rust checks dimensions and normalizes vectors. The tokenizer and weight checksums plus an encoding recipe version identify the vector space. A different identity requires a separate or rebuilt index.
+Extracted text is broken at nearby word boundaries, up to 640 Unicode characters with about 80 characters of overlap. Embeddings include a clipped title. Python tokenizes up to 512 tokens and runs CPU inference. Granite uses CLS pooling on unprefixed text. E5 uses `query:` and `passage:` prefixes and mean-pools unmasked output tokens. Rust checks dimensions and normalizes vectors. The tokenizer and weight checksums plus an encoding recipe version identify the vector space. A different identity requires a separate or rebuilt index.
 
 ## Read path
 
-Path, extension, file kind and result category define the result set. The index confirms that each file still opens under its registered root before considering its saved contents. FTS5 ranks escaped terms with BM25. Cosine similarity ranks stored vectors, taking the best passage per source in each retrieval channel. The local E5 encoder requires a cosine similarity of at least 0.78 to contribute to the semantic ranking. This cutoff is a heuristic calibrated on a small set of German and English queries and can exclude weak paraphrases. Full-text and exact matches remain eligible independently. The query encoder starts only when there are eligible vectors. Image and video records have an FTS5 row for their filename and path and an empty vector field. Reciprocal Rank Fusion combines the top candidates from each list with k = 60. Full path, filename and settings ID matches rank first, then literal code matches in passages. Remaining ties are deterministic.
+Path, extension, file kind and result category define the result set. The index confirms that each file still opens under its registered root before considering its saved contents. FTS5 ranks escaped terms with BM25. Cosine similarity ranks stored vectors, taking the best passage per source in each retrieval channel. Granite uses a minimum cosine similarity of 0.86, chosen on the separate validation queries in the [retrieval benchmark](../benchmarks/retrieval/README.md). Legacy E5 indexes retain the 0.78 cutoff. Full-text and exact matches remain eligible independently. The query encoder starts only when there are eligible vectors. Image and video records have an FTS5 row for their filename and path and an empty vector field. Reciprocal Rank Fusion combines the top candidates from each list with k = 60. Full path, filename and settings ID matches rank first, then literal code matches in passages. Remaining ties are deterministic.
 
 ## Trade-offs
 

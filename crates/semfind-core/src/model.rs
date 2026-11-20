@@ -26,7 +26,7 @@ pub trait Embedder {
     fn encode(&mut self, kind: InputKind, texts: &[String]) -> Result<Vec<Vec<f32>>>;
 }
 
-/// CPU-only E5 encoder using ONNX Runtime through a local Python worker.
+/// CPU-only ONNX encoder through a local Python worker.
 pub struct LocalModel {
     child: Child,
     input: BufWriter<ChildStdin>,
@@ -79,7 +79,11 @@ impl Embedder for LocalModel {
     }
 
     fn minimum_similarity(&self) -> Option<f32> {
-        Some(0.78)
+        Some(if self.identity.starts_with("granite-r2-cls-512-v1:") {
+            0.86
+        } else {
+            0.78
+        })
     }
 
     fn encode(&mut self, kind: InputKind, texts: &[String]) -> Result<Vec<Vec<f32>>> {

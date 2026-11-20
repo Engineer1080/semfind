@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.6
+
+- Use Granite Embedding 97M Multilingual R2 by default for downloads and new indexes. The CPU worker uses CLS pooling and a cosine similarity cutoff of 0.86.
+- Keep existing E5 indexes usable with their original model. To switch, download Granite and build a fresh index using the upgrade instructions in the README.
+- Add a reproducible English retrieval benchmark for E5 Small and Large and Granite 97M and 311M. Granite 97M ranked all eight Linux command answers first in the benchmark.
+
 ## 0.1.5
 
 - Localized terminal help, setup reminders, and status and result labels in English, German, Russian, Portuguese, French, Spanish, and Italian. semfind selects the language from the system locale and uses English as the fallback. Command names, options, and JSON fields use the same identifiers across locales.

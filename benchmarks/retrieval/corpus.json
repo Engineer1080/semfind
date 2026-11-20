@@ -1,0 +1,557 @@
+{
+  "documents": {
+    "notes/amber.md": "The service desk retains project request records for six calendar months after the case is closed. At the end of the retention window a scheduled cleanup removes ticket attachments and identifiers. The schedule applies to closed customer support requests, not invoices or personnel files.",
+    "notes/birch.md": "A quarterly export of invoices is retained for seven fiscal years. Finance archives the signed PDF and a CSV ledger. These financial records are held separately from support requests even if the same customer name appears in both.",
+    "notes/citrine.md": "A new SSH key is registered from the workstation. Keep the private key on that workstation. Submit the public key to the account portal, wait for approval, then confirm login on the staging host. Ask the access desk before replacing the current credential.",
+    "notes/delta.md": "If a production token is exposed, revoke the credential at its issuer first. Generate a fresh token and update consumers, including CI jobs and automation. Inspect audit logs for use of the old credential before closing the incident.",
+    "notes/ember.md": "A portable drive is used as a backup destination on Fridays. Keep one copy disconnected after the weekly run. Every quarter, restore a sample directory into a scratch location and verify the restored files against their saved checksums.",
+    "notes/fir.md": "A snapshot can be mounted read-only from the storage utility. To recover one accidentally deleted file, browse to a date before the deletion and copy the file to another location. Compare the restored copy before replacing anything.",
+    "notes/garnet.md": "A work laptop consumes battery power overnight if it sleeps without suspending. Check whether the lid action suspends the machine. If an external USB accessory can wake it, disconnect the accessory and retest overnight.",
+    "notes/hazel.md": "The workshop bookings calendar is public within the team, but only coordinators can edit it. To reserve the electronics room, request an available time at least one working day beforehand. Take the equipment key from the duty coordinator before entering.",
+    "notes/iris.md": "Fonts used in publications must be legible at the final printed size. Include a caption, provide text alternatives for figures, and avoid encoding information by color alone. Charts for public readers should state the units on each axis.",
+    "notes/juniper.md": "Invoices emailed to the finance desk are processed every Tuesday. Suppliers include the purchase order reference and bank account details in the invoice. Travel expense claims go through a separate employee portal.",
+    "notes/kite.md": "If a document shows jagged characters after export, embed the fonts in the PDF and re-export. Preview the exported file on a second workstation before sending it. The graphics printer expects a high-resolution output rather than a screenshot.",
+    "notes/linden.md": "The bread dough develops flavor slowly when it rests overnight in cool conditions. The next day, shape the loaf, let it rise at room temperature, and bake it on a preheated tray. Flour and water should be weighed rather than measured by volume.",
+    "notes/marble.md": "A loose bicycle chain can jump while changing gear. Rotate the pedals by hand and check the rear mechanism for alignment. Clean the chain first, then lubricate each roller and wipe away excess oil.",
+    "notes/north.md": "For onboarding, new employees collect a badge at reception on their first morning. A manager submits an identity request two workdays in advance. Visitors instead receive a paper day pass and need an escort in restricted areas.",
+    "notes/opal.md": "A paper tray jam often comes from skewed paper guides. Pull out the tray, remove bent sheets, and adjust the guides to the paper width. If the error recurs, inspect the feed rollers for dust before replacing parts.",
+    "notes/pine.md": "The test suite can be exercised without the network using deterministic clock and storage adapters. Integration tests use a temporary work directory. Record the first failing assertion and the seed if a failure is intermittent.",
+    "notes/quartz.md": "Before a release, build the tagged revision and record SHA-256 checksums for all artifacts. A verifier downloads the published manifest and compares the calculated digest with the expected value. Signing the manifest authenticates its provenance.",
+    "notes/reed.md": "For displays that flicker with a dock, verify the refresh rate and resolution and try a different cable. Disable adaptive sync while diagnosing the problem. Brightness is controlled independently by the internal panel settings.",
+    "notes/sienna.md": "The contact sheet lists names and phone numbers for emergency support. Redact personal mobile numbers before forwarding it outside the department. The on-call rotation calendar contains the public duty number.",
+    "notes/tulip.md": "Archive the source drawings and their editable layers before handing off a design. Store the preview separately so a reviewer can inspect it without the design tools. Keep the original dimensions recorded in the project README.",
+    "notes/umber.md": "Before traveling by train, download the electronic ticket so it is available without reception. Keep identification and the booking reference together. Allow additional transfer time if stations are unfamiliar.",
+    "notes/vale.md": "When a branch is ready to merge, ask for a reviewer with context on the component. Summarize the behavior change and attach evidence from tests. Keep unrelated formatting changes in a separate patch where review is easier.",
+    "notes/willow.md": "Regular watering for indoor herbs should keep the soil slightly moist. Use a drainage tray and keep roots out of standing water. Check the soil with a finger before watering again.",
+    "notes/xenia.md": "The archive drive must be encrypted before it stores confidential documents. Store a recovery key separately from the drive, in the approved vault. Check the volume label when connecting more than one external disk.",
+    "notes/yarrow.md": "A virtual private network connects the laptop securely to the office gateway. On a stable Wi-Fi connection, select the corporate VPN profile and authenticate using the security key. If the tunnel drops, record the time and the public gateway address.",
+    "notes/zinnia.md": "Keep the application logs in a temporary staging store for debugging. Diagnostic entries rotate after fourteen days. Crash dumps are copied to a restricted folder and reviewed for sensitive data before use.",
+    "manuals/akazie.md": "In der Stadtbibliothek können ausgeliehene Bücher online um drei Wochen verlängert werden. Im Benutzerkonto die Ausleihe auswählen und auf Verlängern drücken. Eine Verlängerung ist nur möglich, wenn niemand das Buch vorgemerkt hat.",
+    "manuals/baobab.md": "Die Badegäste benötigen für den Schwimmkurs eine eigene Badekappe und ein Handtuch. Kinder müssen spätestens zehn Minuten vor Kursbeginn an der Umkleide sein. Der Einlass erfolgt am Seiteneingang der Schwimmhalle.",
+    "manuals/dattel.md": "Wer aus der Mietwohnung auszieht, muss die Kündigung schriftlich an den Vermieter schicken. Die reguläre Frist beträgt drei Monate. Beim Übergabetermin werden Zählerstände und der Zustand der Wohnung dokumentiert.",
+    "manuals/esche.md": "Für eine Rückerstattung der Dienstreisekosten sind Fahrkarten und Belege im Mitarbeiterportal hochzuladen. Die Abrechnung muss spätestens vier Wochen nach Ende der Reise eingereicht werden. Quittungen für private Anschaffungen sind ausgeschlossen.",
+    "manuals/flieder.md": "Die Gewächshausbewässerung läuft bei trockenem Boden automatisch an. Bei Frost ist das Ventil für die Außenleitung zu schließen. Die Feuchtigkeitssensoren sollten vor Beginn der Pflanzsaison kalibriert werden.",
+    "manuals/granat.md": "Le propriétaire du local doit recevoir un préavis écrit avant le départ. Le document doit mentionner l’adresse, la date de remise des clés et le nom des occupants. Vérifiez auprès du bailleur le délai propre au contrat du local commercial.",
+    "manuals/helice.md": "Pour organiser une collecte de sang, réservez une salle accessible et prévoyez une zone de repos près de la sortie. Une équipe médicale vérifie les inscriptions et le matériel. Les documents administratifs doivent être transmis une semaine avant la collecte.",
+    "manuals/lucero.md": "La bicicleta del servicio de préstamo se devuelve en el mismo estacionamiento donde se recogió. Para finalizar el alquiler, inserte el cierre hasta oír un clic y compruebe en la aplicación que el viaje haya terminado.",
+    "manuals/mistral.md": "Para recuperar el acceso a una cuenta bloqueada, solicita un código de restablecimiento en la mesa de ayuda. Presenta una identificación y espera la confirmación. Evita compartir la contraseña anterior por correo electrónico.",
+    "logs/workshop.log": "2026-02-12 08:10 INFO pump inspection started\n2026-02-12 08:14 ERROR E-0042 discharge pipe obstructed\n2026-02-12 08:31 INFO discharge valve reopened and flow restored",
+    "logs/validator.log": "2026-03-18 09:51 WARN E-0412 timestamp outside accepted window\n2026-03-18 09:56 INFO time service resynchronized\n2026-03-18 10:02 INFO validator test succeeded",
+    "logs/transport.log": "2026-04-11 15:08 ERROR NX-330 handshake took longer than the configured timeout\n2026-04-11 15:09 INFO reconnect succeeded after backoff",
+    "tables/kiosk.csv": "location,weekday,opening,closing\nriver kiosk,Monday,08:00,16:00\nriver kiosk,Saturday,10:00,15:00\nhill kiosk,Monday,09:00,18:00\n"
+  },
+  "queries": [
+    {
+      "split": "validation",
+      "group": "documents",
+      "query": "When do we purge records after resolving a customer ticket?",
+      "category": "file",
+      "relevant": [
+        "notes/amber.md"
+      ]
+    },
+    {
+      "split": "validation",
+      "group": "documents",
+      "query": "How do I check a copy from an offline backup can be opened?",
+      "category": "file",
+      "relevant": [
+        "notes/ember.md"
+      ]
+    },
+    {
+      "split": "validation",
+      "group": "documents",
+      "query": "How do I get travel reimbursements approved after returning?",
+      "category": "file",
+      "relevant": [
+        "manuals/esche.md"
+      ]
+    },
+    {
+      "split": "validation",
+      "group": "cross-language",
+      "query": "What is the notice period before leaving a rental apartment?",
+      "category": "file",
+      "relevant": [
+        "manuals/dattel.md"
+      ]
+    },
+    {
+      "split": "validation",
+      "group": "cross-language",
+      "query": "How do I get back into a locked account?",
+      "category": "file",
+      "relevant": [
+        "manuals/mistral.md"
+      ]
+    },
+    {
+      "split": "validation",
+      "group": "literal",
+      "query": "E-0412",
+      "category": "file",
+      "relevant": [
+        "logs/validator.log"
+      ]
+    },
+    {
+      "split": "validation",
+      "group": "commands",
+      "query": "What can tell me the absolute path to my present working directory?",
+      "category": "command",
+      "relevant": [
+        "command.files.current-directory"
+      ]
+    },
+    {
+      "split": "validation",
+      "group": "commands",
+      "query": "Which Linux utility reports open ports listening for connections?",
+      "category": "command",
+      "relevant": [
+        "command.network.ports"
+      ]
+    },
+    {
+      "split": "validation",
+      "group": "settings",
+      "query": "My display looks dim. Where can I make it brighter?",
+      "category": "setting",
+      "relevant": [
+        "display.brightness"
+      ]
+    },
+    {
+      "split": "validation",
+      "group": "settings",
+      "query": "How do I set up a wireless connection?",
+      "category": "setting",
+      "relevant": [
+        "network.wifi"
+      ]
+    },
+    {
+      "split": "validation",
+      "group": "negative",
+      "query": "neutrino spectroscopy orbital decay",
+      "category": "file",
+      "relevant": []
+    },
+    {
+      "split": "validation",
+      "group": "negative",
+      "query": "ornithological migration starlings",
+      "category": null,
+      "relevant": []
+    },
+    {
+      "split": "validation",
+      "group": "negative",
+      "query": "What is the policy for reserving the swimming pool for a private event?",
+      "category": "file",
+      "relevant": []
+    },
+    {
+      "split": "validation",
+      "group": "negative",
+      "query": "How do I enable fractional scaling?",
+      "category": "setting",
+      "relevant": []
+    },
+    {
+      "split": "validation",
+      "group": "negative",
+      "query": "Which cut of beef should I use for a stew?",
+      "category": "file",
+      "relevant": []
+    },
+    {
+      "split": "validation",
+      "group": "negative",
+      "query": "quorum blockchain consensus",
+      "category": null,
+      "relevant": []
+    },
+    {
+      "split": "test",
+      "group": "documents",
+      "query": "I need the original document that tells me what to do after a leaked credential.",
+      "category": null,
+      "relevant": [
+        "notes/delta.md"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "documents",
+      "query": "Can I retrieve one erased item from an earlier snapshot?",
+      "category": "file",
+      "relevant": [
+        "notes/fir.md"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "documents",
+      "query": "What are the rules for making graphs understandable to people who cannot distinguish colors?",
+      "category": "file",
+      "relevant": [
+        "notes/iris.md"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "documents",
+      "query": "The printout looks pixelated and the letters are broken. How can I prepare a cleaner PDF?",
+      "category": "file",
+      "relevant": [
+        "notes/kite.md"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "documents",
+      "query": "What should I do when the laptop drains its charge while the lid is closed?",
+      "category": "file",
+      "relevant": [
+        "notes/garnet.md"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "documents",
+      "query": "How can I stop my bike from skipping gears?",
+      "category": "file",
+      "relevant": [
+        "notes/marble.md"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "documents",
+      "query": "Which guide tells a new hire where to pick up their access card?",
+      "category": "file",
+      "relevant": [
+        "notes/north.md"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "documents",
+      "query": "Where are the instructions for fixing a printer that keeps swallowing paper?",
+      "category": "file",
+      "relevant": [
+        "notes/opal.md"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "documents",
+      "query": "How can I tell whether a downloaded release artifact matches what was published?",
+      "category": "file",
+      "relevant": [
+        "notes/quartz.md"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "documents",
+      "query": "The monitor goes in and out when attached to the docking station.",
+      "category": "file",
+      "relevant": [
+        "notes/reed.md"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "documents",
+      "query": "Where is the advice on protecting data on removable storage?",
+      "category": "file",
+      "relevant": [
+        "notes/xenia.md"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "documents",
+      "query": "What is the time limit for keeping debugging logs?",
+      "category": "file",
+      "relevant": [
+        "notes/zinnia.md"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "documents",
+      "query": "How can I save a document for a reviewer who cannot open the authoring software?",
+      "category": "file",
+      "relevant": [
+        "notes/tulip.md"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "documents",
+      "query": "What do I need to do before requesting a review for my branch?",
+      "category": "file",
+      "relevant": [
+        "notes/vale.md"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "documents",
+      "query": "My bread recipe lets the mixture sit until morning. Where is it?",
+      "category": "file",
+      "relevant": [
+        "notes/linden.md"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "documents",
+      "query": "When does the river kiosk close on Saturday?",
+      "category": "file",
+      "relevant": [
+        "tables/kiosk.csv"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "cross-language",
+      "query": "How can I renew a book I borrowed from the public library?",
+      "category": "file",
+      "relevant": [
+        "manuals/akazie.md"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "cross-language",
+      "query": "What does a child have to bring to the pool lesson?",
+      "category": "file",
+      "relevant": [
+        "manuals/baobab.md"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "cross-language",
+      "query": "What preparations are required for a blood donation session?",
+      "category": "file",
+      "relevant": [
+        "manuals/helice.md"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "cross-language",
+      "query": "Where must I return the bicycle I rented for a short trip?",
+      "category": "file",
+      "relevant": [
+        "manuals/lucero.md"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "cross-language",
+      "query": "How should I shut off garden watering equipment when it freezes?",
+      "category": "file",
+      "relevant": [
+        "manuals/flieder.md"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "literal",
+      "query": "E-0042",
+      "category": null,
+      "relevant": [
+        "logs/workshop.log"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "literal",
+      "query": "NX-330",
+      "category": "file",
+      "relevant": [
+        "logs/transport.log"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "literal",
+      "query": "yarrow.md",
+      "category": null,
+      "relevant": [
+        "notes/yarrow.md"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "literal",
+      "query": "birch.md",
+      "category": "file",
+      "relevant": [
+        "notes/birch.md"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "commands",
+      "query": "What terminal tool tells me which directories take up the most space?",
+      "category": "command",
+      "relevant": [
+        "command.disk.directory-usage"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "commands",
+      "query": "How can I list files bigger than a hundred megabytes in subfolders?",
+      "category": "command",
+      "relevant": [
+        "command.files.find-large"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "commands",
+      "query": "Which command lets me see new entries arriving in a log in real time?",
+      "category": "command",
+      "relevant": [
+        "command.text.follow-log"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "commands",
+      "query": "How can I count lines in a plain text file from the terminal?",
+      "category": "command",
+      "relevant": [
+        "command.text.line-count"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "commands",
+      "query": "How can I view the contents of a compressed tarball before unpacking it?",
+      "category": "command",
+      "relevant": [
+        "command.archive.inspect"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "commands",
+      "query": "How do I add a new package and its dependencies from a repository?",
+      "category": "command",
+      "relevant": [
+        "command.packages.install.debian"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "commands",
+      "query": "How do I show the memory available on this machine?",
+      "category": "command",
+      "relevant": [
+        "command.system.memory"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "commands",
+      "query": "How do I find which installed package is responsible for a particular binary?",
+      "category": "command",
+      "relevant": [
+        "command.packages.owner.debian"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "settings",
+      "query": "I want the sound to come through my headphones instead of speakers.",
+      "category": "setting",
+      "relevant": [
+        "audio.output.volume"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "settings",
+      "query": "Where do I add another keyboard layout for typing in a different language?",
+      "category": "setting",
+      "relevant": [
+        "input.keyboard"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "settings",
+      "query": "What can I adjust to make my notebook last longer away from a charger?",
+      "category": "setting",
+      "relevant": [
+        "power.battery"
+      ]
+    },
+    {
+      "split": "test",
+      "group": "negative",
+      "query": "hyperspectral albedo calibration",
+      "category": "file",
+      "relevant": []
+    },
+    {
+      "split": "test",
+      "group": "negative",
+      "query": "galaxy redshift spectroscopy",
+      "category": null,
+      "relevant": []
+    },
+    {
+      "split": "test",
+      "group": "negative",
+      "query": "enzyme kinetics thermodynamics",
+      "category": "command",
+      "relevant": []
+    },
+    {
+      "split": "test",
+      "group": "negative",
+      "query": "How do I change my screen's color temperature at sunset?",
+      "category": "setting",
+      "relevant": []
+    },
+    {
+      "split": "test",
+      "group": "negative",
+      "query": "Where are the procurement rules for renting a stage for a concert?",
+      "category": "file",
+      "relevant": []
+    },
+    {
+      "split": "test",
+      "group": "negative",
+      "query": "How do I record gameplay while streaming to a live audience?",
+      "category": "command",
+      "relevant": []
+    },
+    {
+      "split": "test",
+      "group": "negative",
+      "query": "penguin incubation blubber",
+      "category": "file",
+      "relevant": []
+    },
+    {
+      "split": "test",
+      "group": "negative",
+      "query": "Which area of the office stores spare fire extinguishers?",
+      "category": "file",
+      "relevant": []
+    }
+  ]
+}

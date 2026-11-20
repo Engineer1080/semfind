@@ -276,10 +276,21 @@ fn run(cli: Cli, output: &mut impl Write, messages: &Messages) -> Result<()> {
             eprintln!("semfind: {line}");
         }
     }
+    let legacy_index = cli.model_dir.is_none()
+        && index
+            .embedding_model()?
+            .is_some_and(|identity| identity.starts_with("e5-mean-pool-v1:"));
     let start_model = || {
         let directory = match &cli.model_dir {
             Some(path) => path.clone(),
-            None => data_dir(messages)?.join("model"),
+            None => {
+                let model_dir = data_dir(messages)?.join("model");
+                if legacy_index {
+                    model_dir
+                } else {
+                    model_dir.join("granite-97m-r2")
+                }
+            }
         };
         LocalModel::start(&cli.python, &directory)
     };
