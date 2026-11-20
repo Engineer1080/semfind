@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.9
+
+- Describe semfind as an offline Linux search CLI in the README, package metadata, and localized command help.
+- Document subprocess integration for programs and AI agents with a JSON search example, index status, and exit codes.
+- List search and launcher integrations for KDE Plasma, GNOME, COSMIC, and other Linux desktops as planned work. The CLI continues to include a COSMIC settings catalog.
+
 ## 0.1.8
 
 - Select the inference device automatically based on the configured ONNX Runtime. Try NVIDIA CUDA, AMD MIGraphX, and then the CPU. In automatic mode, retry failed GPU inference on the CPU.

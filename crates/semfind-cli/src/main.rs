@@ -16,11 +16,7 @@ use std::{
 use ui::Messages;
 
 #[derive(Parser)]
-#[command(
-    version,
-    about = "Offline hybrid search for Linux",
-    subcommand_precedence_over_arg = true
-)]
+#[command(version, about, subcommand_precedence_over_arg = true)]
 struct Cli {
     #[arg(long, env = "SEMFIND_INDEX_DIR", global = true)]
     index_dir: Option<PathBuf>,

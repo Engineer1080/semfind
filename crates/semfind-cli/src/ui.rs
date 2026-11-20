@@ -58,7 +58,7 @@ impl Messages {
 }
 
 const EN: Messages = Messages {
-    about: "Offline hybrid search for Linux",
+    about: env!("CARGO_PKG_DESCRIPTION"),
     init: "Index your home directory, desktop apps, and local commands.",
     index: "Update a directory and the built-in catalogs. Omit the directory for catalogs only.",
     status: "Show indexed directories and counts.",
@@ -108,7 +108,7 @@ const EN: Messages = Messages {
 };
 
 const DE: Messages = Messages {
-    about: "Lokale Datei-, Programm- und Befehlssuche für Linux",
+    about: "Lokale Datei-, Programm- und Befehlssuche im Linux-Terminal",
     init: "Home-Ordner, Desktop-Programme und lokale Befehle indexieren.",
     index: "Einen Ordner und die eingebauten Kataloge aktualisieren. Ohne Ordner werden nur die Kataloge aktualisiert.",
     status: "Indexierte Ordner und Anzahlen anzeigen.",
@@ -158,7 +158,7 @@ const DE: Messages = Messages {
 };
 
 const RU: Messages = Messages {
-    about: "Локальный поиск файлов, приложений и команд для Linux",
+    about: "Локальный поиск файлов, приложений и команд в терминале Linux",
     init: "Индексировать домашний каталог, приложения и локальные команды.",
     index: "Обновить индекс каталога и встроенные справочники. Без каталога обновляются только справочники.",
     status: "Показать проиндексированные каталоги и количество записей.",
@@ -208,7 +208,7 @@ const RU: Messages = Messages {
 };
 
 const PT: Messages = Messages {
-    about: "Busca local de arquivos, aplicativos e comandos para Linux",
+    about: "Busca local de arquivos, aplicativos e comandos no terminal do Linux",
     init: "Indexar a pasta pessoal, os aplicativos e os comandos locais.",
     index: "Atualizar o índice de uma pasta e os catálogos integrados. Omita a pasta para atualizar só os catálogos.",
     status: "Mostrar as pastas indexadas e as contagens.",
@@ -258,7 +258,7 @@ const PT: Messages = Messages {
 };
 
 const FR: Messages = Messages {
-    about: "Recherche locale de fichiers, d’applications et de commandes pour Linux",
+    about: "Recherche locale de fichiers, d’applications et de commandes dans le terminal Linux",
     init: "Indexer le dossier personnel, les applications et les commandes locales.",
     index: "Actualiser l’index d’un dossier et les catalogues intégrés. Omettez le dossier pour actualiser uniquement les catalogues.",
     status: "Afficher les dossiers indexés et le nombre d’entrées.",
@@ -308,7 +308,7 @@ const FR: Messages = Messages {
 };
 
 const ES: Messages = Messages {
-    about: "Búsqueda local de archivos, aplicaciones y comandos para Linux",
+    about: "Búsqueda local de archivos, aplicaciones y comandos en la terminal de Linux",
     init: "Indexar la carpeta personal, las aplicaciones y los comandos locales.",
     index: "Actualizar el índice de una carpeta y los catálogos integrados. Omite la carpeta para actualizar solo los catálogos.",
     status: "Mostrar las carpetas indexadas y el número de entradas.",
@@ -358,7 +358,7 @@ const ES: Messages = Messages {
 };
 
 const IT: Messages = Messages {
-    about: "Ricerca locale di file, applicazioni e comandi per Linux",
+    about: "Ricerca locale di file, applicazioni e comandi nel terminale Linux",
     init: "Indicizzare la cartella personale, le applicazioni e i comandi locali.",
     index: "Aggiornare l’indice di una cartella e i cataloghi integrati. Ometti la cartella per aggiornare solo i cataloghi.",
     status: "Mostrare le cartelle indicizzate e il numero di voci.",
