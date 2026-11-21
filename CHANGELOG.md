@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.9
+
+- Build a user-local COSMIC Launcher plugin bundle with `python3 integrations/cosmic/package.py`. Its installer reuses the user's existing Semfind setup.
+- Add optional KDE Plasma 6 KRunner and GNOME Shell search adapters for the existing Semfind index.
+- Add a Cinnamon menu search provider and a Rofi search mode for desktops such as Xfce, LXQt, and MATE.
+
 ## 0.2.8
 
 - Interpret explicit requests such as `Ein Programm zum Chatten` as searches for installed applications. Match common chat and messenger terms across languages to keep unrelated results out of chat application searches.

@@ -32,12 +32,21 @@ def write_file(destination, data, mode):
 
 def main():
     source = Path(__file__).resolve().parent
-    release = source.parents[1] / "target/release"
+    release = (source / "../../target/release").resolve()
+    packaged_plugin = source / "semfind-cosmic"
+    local_cli = release / "semfind"
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--plugin-binary", default=str(release / "semfind-cosmic"))
+    parser.add_argument(
+        "--plugin-binary",
+        default=str(packaged_plugin if packaged_plugin.is_file() else release / "semfind-cosmic"),
+    )
     parser.add_argument(
         "--semfind",
-        default=os.environ.get("SEMFIND_CLI") or shutil.which("semfind") or str(release / "semfind"),
+        default=(
+            os.environ.get("SEMFIND_CLI")
+            or shutil.which("semfind")
+            or (str(local_cli) if local_cli.is_file() else "semfind")
+        ),
         help="semfind executable that the launcher should start",
     )
     args = parser.parse_args()

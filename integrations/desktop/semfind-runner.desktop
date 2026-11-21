@@ -1,0 +1,14 @@
+[Desktop Entry]
+Name=Semfind
+Description=Semantic search for local files, applications, and Linux commands
+Type=Service
+Icon=system-search
+X-KDE-PluginInfo-Name=semfind
+X-KDE-PluginInfo-EnabledByDefault=true
+X-Plasma-API=DBus
+X-Plasma-DBusRunner-Service=io.github.Engineer1080.Semfind
+X-Plasma-DBusRunner-Path=/io/github/Engineer1080/Semfind/Runner
+X-Plasma-Runner-Match-Regex=(?i)^semfind\\s+\\S
+X-Plasma-Runner-Syntaxes=semfind :q:
+X-Plasma-Runner-Syntax-Descriptions=Search your Semfind index
+X-Plasma-Request-Actions-Once=true

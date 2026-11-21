@@ -16,6 +16,7 @@ Semfind uses local multilingual embeddings to match queries by meaning. A German
 - With Florence-2 set up, `semfind init` makes JPEG, PNG, and WebP images searchable by subject alongside documents.
 - Incremental rescans that recalculate embeddings only for changed content. Saved directory exclusions and manual index removal.
 - An optional COSMIC Launcher plugin searches the same index. [Installation and usage](integrations/cosmic/README.md)
+- Optional KDE Plasma 6, GNOME Shell, Cinnamon, and Rofi adapters use the same index. [Installation and usage](integrations/desktop/README.md)
 
 The CLI works independently of the desktop environment. Pop!_OS 24.04 is one of the [tested environments](docs/verification.md). See the [roadmap](docs/roadmap.md) for planned desktop integrations and other work.
 
