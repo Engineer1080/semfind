@@ -744,7 +744,7 @@ fn real_model_init_indexes_home_desktop_applications_and_manuals() -> Result<()>
 
 #[test]
 #[ignore = "requires a local model and Python environment"]
-fn real_model_explicit_chat_requests_find_installed_messengers() -> Result<()> {
+fn real_model_routes_explicit_application_requests() -> Result<()> {
     let temp = tempfile::Builder::new()
         .prefix("semfind-chat-app-")
         .tempdir()?;
@@ -779,11 +779,20 @@ fn real_model_explicit_chat_requests_find_installed_messengers() -> Result<()> {
     };
     let run = |args: &[&str]| -> Result<Vec<u8>> { success(command().args(args).output()?) };
     run(&["init", "--no-caption-images"])?;
-    for query in ["Ein Programm zum Chatten", "An app for chatting?"] {
+    for (query, expected) in [
+        (
+            "Ein Programm zum Installieren von Programmen",
+            "store.desktop",
+        ),
+        ("An app for voice and text chat?", "voices.desktop"),
+    ] {
         let hits: Vec<Hit> = serde_json::from_slice(&run(&[query, "--json"])?)?;
-        assert_eq!(hits.len(), 1, "{hits:?}");
-        assert_eq!(hits[0].id, "voices.desktop");
-        assert_eq!(hits[0].category, Category::Application);
+        assert_eq!(
+            hits.first().map(|hit| hit.id.as_str()),
+            Some(expected),
+            "{hits:?}"
+        );
+        assert!(hits.iter().all(|hit| hit.category == Category::Application));
     }
     #[cfg(unix)]
     {
@@ -799,7 +808,7 @@ fn real_model_explicit_chat_requests_find_installed_messengers() -> Result<()> {
         let auto = command()
             .env("SEMFIND_DEVICE", "auto")
             .args([
-                "Ein Programm zum Chatten",
+                "An app for voice and text chat?",
                 "--json",
                 "--time",
                 "--no-daemon",
@@ -815,7 +824,12 @@ fn real_model_explicit_chat_requests_find_installed_messengers() -> Result<()> {
         let python = env::var_os("SEMFIND_PYTHON").context("set SEMFIND_PYTHON")?;
         let explicit = command()
             .env("SEMFIND_DEVICE", "auto")
-            .args(["search", "Ein Programm zum Chatten", "--json", "--python"])
+            .args([
+                "search",
+                "An app for voice and text chat?",
+                "--json",
+                "--python",
+            ])
             .arg(python)
             .output()?;
         assert!(!String::from_utf8_lossy(&explicit.stderr).contains("test CUDA unavailable"));
@@ -835,8 +849,12 @@ fn real_model_explicit_chat_requests_find_installed_messengers() -> Result<()> {
 
     fs::remove_file(messenger)?;
     run(&["init", "--no-caption-images"])?;
-    let none: Vec<Hit> = serde_json::from_slice(&run(&["Ein Programm zum Chatten", "--json"])?)?;
-    assert!(none.is_empty(), "{none:?}");
+    let hits: Vec<Hit> =
+        serde_json::from_slice(&run(&["An app for voice and text chat?", "--json"])?)?;
+    assert!(
+        hits.iter().all(|hit| hit.id != "voices.desktop"),
+        "{hits:?}"
+    );
     Ok(())
 }
 

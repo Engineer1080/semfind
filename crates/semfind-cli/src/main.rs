@@ -551,6 +551,7 @@ fn run(
             None => Ok(data_dir(messages)?.join("model/florence-2-base-ft")),
         }
     };
+    let allow_caption_gpu = !matches!(device, ExecutionDevice::Cpu);
     match cli.command {
         Some(Command::Status { json }) => {
             let status = index.status()?;
@@ -594,7 +595,12 @@ fn run(
             let home = env::var_os("HOME").context(messages.home_required)?;
             let directory = (!no_caption_images).then(caption_directory).transpose()?;
             let mut captioner = match directory.as_deref() {
-                Some(path) => match open_optional_captioner(&cli.python, path) {
+                Some(path) => match open_optional_captioner(
+                    &cli.python,
+                    path,
+                    runtime_dir.as_deref(),
+                    allow_caption_gpu,
+                ) {
                     Ok(captioner) => captioner,
                     Err(error) if force => return Err(error),
                     Err(error) => {
@@ -640,6 +646,9 @@ fn run(
                     "semfind: ONNX Runtime (startup): {}",
                     model.initial_provider()
                 );
+                if let Some(backend) = captioner.as_ref().and_then(FlorenceCaptioner::backend) {
+                    eprintln!("semfind: Florence-2: {backend}");
+                }
                 timing.print(messages);
             }
             print_index_report(output, &report, messages)?;
@@ -658,7 +667,12 @@ fn run(
             gpu_hint.show(model.uses_cpu(), false);
             let report = if caption_images {
                 let directory = caption_directory()?;
-                let mut captioner = FlorenceCaptioner::new(&cli.python, &directory)?;
+                let mut captioner = FlorenceCaptioner::with_runtime(
+                    &cli.python,
+                    &directory,
+                    runtime_dir.as_deref(),
+                    allow_caption_gpu,
+                )?;
                 index.synchronize_with_image_captions(
                     root.as_deref().expect("--caption-images requires a root"),
                     &options,
@@ -757,12 +771,19 @@ fn start_text_model(
 fn open_optional_captioner<'a>(
     python: &'a Path,
     directory: &'a Path,
+    runtime_dir: Option<&'a Path>,
+    allow_gpu: bool,
 ) -> Result<Option<FlorenceCaptioner<'a>>> {
     if directory
         .try_exists()
         .with_context(|| format!("check {}", directory.display()))?
     {
-        Ok(Some(FlorenceCaptioner::new(python, directory)?))
+        Ok(Some(FlorenceCaptioner::with_runtime(
+            python,
+            directory,
+            runtime_dir,
+            allow_gpu,
+        )?))
     } else {
         Ok(None)
     }

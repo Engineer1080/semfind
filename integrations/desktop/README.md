@@ -12,7 +12,7 @@ From the repository root, run:
 /usr/bin/python3 integrations/desktop/install.py plasma
 ```
 
-Log out and back in so KRunner reloads its plugins. Open KRunner and enter `semfind Ein Programm zum Chatten`. Semfind is listed in the KRunner plugin settings. The `semfind` prefix limits when our runner participates. [KRunner D-Bus runner metadata](https://develop.kde.org/docs/plasma/krunner/metadata/)
+Log out and back in so KRunner reloads its plugins. Open KRunner and enter `semfind Freien Speicherplatz auf Laufwerken anzeigen`. Semfind is listed in the KRunner plugin settings. The `semfind` prefix limits when our runner participates. [KRunner D-Bus runner metadata](https://develop.kde.org/docs/plasma/krunner/metadata/)
 
 ## GNOME Shell
 
@@ -24,7 +24,7 @@ sudo install -Dm644 integrations/desktop/semfind-search-provider.ini \
   /usr/local/share/gnome-shell/search-providers/semfind-search-provider.ini
 ```
 
-The installer registers the D-Bus service and application entry for your user. GNOME Shell discovers provider descriptors through its system data directories, so the second command installs the descriptor separately. Log out and back in. In Settings → Search, enable Semfind if it is disabled. Open Activities and type a query such as `Ein Programm zum Chatten`. [GNOME Shell search providers](https://developer.gnome.org/documentation/tutorials/search-provider.html) · [GNOME Shell provider discovery](https://github.com/GNOME/gnome-shell/blob/main/js/ui/remoteSearch.js)
+The installer registers the D-Bus service and application entry for your user. GNOME Shell discovers provider descriptors through its system data directories, so the second command installs the descriptor separately. Log out and back in. In Settings → Search, enable Semfind if it is disabled. Open Activities and type a query such as `Freien Speicherplatz auf Laufwerken anzeigen`. [GNOME Shell search providers](https://developer.gnome.org/documentation/tutorials/search-provider.html) · [GNOME Shell provider discovery](https://github.com/GNOME/gnome-shell/blob/main/js/ui/remoteSearch.js)
 
 Use `both` in place of `plasma` or `gnome` to install both adapters for the same user. For GNOME, install the provider descriptor as above.
 
@@ -36,7 +36,7 @@ From a Cinnamon session, run:
 /usr/bin/python3 integrations/desktop/install.py cinnamon
 ```
 
-The installer adds Semfind to Cinnamon's enabled search providers. Open the built-in Cinnamon menu and type a query such as `Ein Programm zum Chatten`. For commands, the result shows the example and selecting it copies that example. If you just upgraded the adapter and Cinnamon still has an older copy loaded, log out and back in. [Cinnamon search provider interface](https://github.com/linuxmint/cinnamon/blob/master/js/ui/searchProviderManager.js)
+The installer adds Semfind to Cinnamon's enabled search providers. Open the built-in Cinnamon menu and type a query such as `Freien Speicherplatz auf Laufwerken anzeigen`. For commands, the result shows the example and selecting it copies that example. If you just upgraded the adapter and Cinnamon still has an older copy loaded, log out and back in. [Cinnamon search provider interface](https://github.com/linuxmint/cinnamon/blob/master/js/ui/searchProviderManager.js)
 
 ## Rofi on Xfce, LXQt, MATE and other desktops
 

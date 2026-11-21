@@ -27,25 +27,37 @@ def caption(data, processor, model):
     except (OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning):
         return None
 
-    inputs = processor(text=TASK, images=image, return_tensors="pt")
+    inputs = processor(text=TASK, images=image, return_tensors="pt").to(model.device)
     output = model.generate(**inputs, max_new_tokens=80, num_beams=1, do_sample=False)
-    generated = processor.batch_decode(output, skip_special_tokens=False)[0]
+    generated = processor.batch_decode(output.cpu(), skip_special_tokens=False)[0]
     result = processor.post_process_generation(generated, task=TASK, image_size=image.size)
     text = " ".join(result[TASK].replace("\x00", " ").split())
     return text[:512].strip() or None
 
 
+def select_backend(requested):
+    if requested == "cpu":
+        return "cpu"
+    backend = "rocm" if torch.version.hip else "cuda"
+    if torch.cuda.is_available() and requested in ("auto", backend):
+        return backend
+    if requested == "auto":
+        return "cpu"
+    raise RuntimeError(f"Florence-2 could not access a PyTorch {requested.upper()} device")
+
+
 def main():
-    directory = sys.argv[1]
+    directory, requested = sys.argv[1:3]
     torch.set_num_threads(2)
     torch.set_num_interop_threads(1)
     Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
     with redirect_stdout(sys.stderr):
+        backend = select_backend(requested)
         processor = Florence2Processor.from_pretrained(directory, local_files_only=True)
         model = Florence2ForConditionalGeneration.from_pretrained(
             directory, local_files_only=True, use_safetensors=True, dtype=torch.float32,
-        ).eval()
-    print(json.dumps(True))
+        ).to("cpu" if backend == "cpu" else "cuda").eval()
+    print(json.dumps(backend))
     with torch.inference_mode():
         while size := sys.stdin.buffer.read(4):
             if len(size) != 4:

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+
+- Use compatible PyTorch CUDA or ROCm devices for Florence-2 captioning by default. Retry on the CPU if GPU inference fails and report the caption backend with `init --time`. Existing captions are reused across backends.
+- Remove the messenger-specific query rewrite and keyword filter. Use the full query for embeddings and keep general application intent detection.
+
 ## 0.2.9
 
 - Build a user-local COSMIC Launcher plugin bundle with `python3 integrations/cosmic/package.py`. Its installer reuses the user's existing Semfind setup.

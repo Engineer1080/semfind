@@ -216,9 +216,7 @@ impl Index {
         let mut candidates = HashMap::new();
         let needle = query.to_lowercase();
         let mut category = options.category;
-        let mut semantic_query = query;
         let mut lexical_query = query;
-        let mut chat_task = false;
         if category.is_none_or(|category| category == Category::Application)
             && options.file_kind.is_none()
             && path.is_none()
@@ -233,28 +231,7 @@ impl Index {
             )?
         {
             category = Some(Category::Application);
-            chat_task = matches!(
-                task,
-                "chat"
-                    | "chatten"
-                    | "chatting"
-                    | "messenger"
-                    | "instant messaging"
-                    | "charlar"
-                    | "chatear"
-                    | "chatter"
-                    | "discuter"
-                    | "conversar"
-                    | "chattare"
-                    | "общения"
-            );
-            semantic_query = if chat_task { "chat messenger" } else { task };
-            lexical_query = if chat_task {
-                "chat chatten chatting messenger messaging instantmessaging sofortnachrichten \
-                 messagerie mensajería mensagens messaggistica мессенджер"
-            } else {
-                task
-            };
+            lexical_query = task;
         }
         {
             let mut statement = tx.prepare(
@@ -387,9 +364,6 @@ impl Index {
                 }
             }
         }
-        if chat_task {
-            candidates.retain(|_, item| item.lexical_chunk.is_some());
-        }
         let file_kind = options
             .file_kind
             .or_else(|| extension.as_deref().and_then(FileKind::from_extension));
@@ -407,10 +381,9 @@ impl Index {
                 let bytes = row.get_ref(2)?.as_blob()?;
                 let embedding = match &query_embedding {
                     Some(embedding) => embedding,
-                    None => query_embedding.insert(encode.take().expect("first embedding")(
-                        &tx,
-                        semantic_query,
-                    )?),
+                    None => {
+                        query_embedding.insert(encode.take().expect("first embedding")(&tx, query)?)
+                    }
                 };
                 let score = similarity(&embedding.vector, bytes)?;
                 if embedding.minimum_similarity.is_none_or(|min| score >= min)

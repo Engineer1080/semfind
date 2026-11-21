@@ -144,7 +144,7 @@ python3 -m venv "$cuda_runtime"
 semfind init --time
 ```
 
-With the default `--device auto`, search and indexing first try dedicated runtimes in `runtime/cuda` and `runtime/migraphx` under the Semfind data directory, in that order. You can symlink either directory to an existing virtual environment. If neither dedicated GPU starts, Semfind uses its configured Python environment and tries CUDA, MIGraphX, then CPU as available. A GPU inference error in automatic mode retries on the CPU. `--time` reports the provider selected when the embedding model starts. Florence-2 uses the configured Python environment and CPU captioning.
+With the default `--device auto`, search and indexing first try dedicated text embedding runtimes in `runtime/cuda` and `runtime/migraphx` under the Semfind data directory, in that order. You can symlink either directory to an existing virtual environment. If neither dedicated GPU starts, Semfind uses its configured Python environment and tries CUDA, MIGraphX, then CPU as available. A GPU inference error in automatic mode retries on the CPU. `--time` reports the provider selected when the embedding model starts. Florence-2 uses [separate PyTorch runtimes for captioning](#search-images-by-subject).
 
 When a search or indexing command uses the CPU for text embeddings, Semfind prints a performance tip with CUDA and MIGraphX setup links on stderr once per invocation. Use `--no-gpu-hint` to suppress it for one invocation, or set `SEMFIND_NO_GPU_HINT=true` for your environment.
 
@@ -266,7 +266,22 @@ semfind "Katze auf dem Sofa" --json
 semfind "Katze auf dem Sofa" --kind image --json
 ```
 
-Caption generation runs locally on the CPU. The first run can take longer for large photo collections. Subsequent scans only generate captions for new or changed images, or when the caption model changes. Searches use the configured text embedding model. The download is part of the separate setup above. If Florence-2 is unavailable during `init`, Semfind keeps the captions it already has and indexes new images by filename and path. Use `semfind init --no-caption-images` to skip captioning for one run.
+Florence-2 runs locally and automatically uses a compatible PyTorch GPU when available. Semfind tries dedicated runtimes in `runtime/florence-cuda` and `runtime/florence-rocm` under the Semfind data directory, then checks the configured Python environment. If GPU captioning fails, Semfind retries on the CPU. `--device cpu` forces CPU captioning, and `--python` uses the chosen interpreter for device detection. `semfind init --time` reports the Florence-2 backend separately when it generates captions.
+
+For an NVIDIA GPU with a CUDA 13-capable driver, create a dedicated Florence-2 runtime:
+
+```bash
+florence_runtime="${XDG_DATA_HOME:-$HOME/.local/share}/semfind/runtime/florence-cuda"
+python3 -m venv "$florence_runtime"
+"$florence_runtime/bin/python" -m pip install 'torch==2.14.1' 'torchvision==0.29.1' --index-url https://download.pytorch.org/whl/cu130
+"$florence_runtime/bin/python" -m pip install 'transformers==5.23.0' 'Pillow==13.0.0'
+```
+
+For AMD GPUs, use a [PyTorch ROCm build](https://pytorch.org/get-started/locally/) in `runtime/florence-rocm` and install the same Transformers and Pillow dependencies. The Florence-2 checkpoint is shared between backends.
+
+In a local check with Florence-2 Base FT, the median time to describe one repeated test image after warmup was 3.01 s on a Ryzen 7 5800X3D and 0.15 s on a GeForce RTX 4080 SUPER with CUDA. Both backends produced the same description for that image. The timing excludes model startup and index updates. ROCm still needs hardware verification.
+
+The first run can take longer for large photo collections. Subsequent scans generate captions for new or changed images, or when the caption model changes. If Florence-2 is unavailable during `init`, Semfind keeps the captions it already has and indexes new images by filename and path. Use `semfind init --no-caption-images` to skip captioning for one run.
 
 Use `semfind index ROOT --caption-images` to explicitly caption images in a separate indexed root. Use `SEMFIND_CAPTION_MODEL_DIR` or `--caption-model-dir` for another local checkpoint directory. Deleting an image or unindexing its root removes its caption. Unreadable image contents fall back to filename and path search when the file itself remains accessible. Caption extraction limits images to 16 MiB and 40 million pixels.
 
