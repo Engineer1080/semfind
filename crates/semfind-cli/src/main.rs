@@ -6,6 +6,8 @@ use semfind_core::{
 };
 mod config;
 mod distro;
+#[cfg(target_os = "linux")]
+mod gpu_setup;
 mod progress;
 #[cfg(target_os = "linux")]
 mod resident;
@@ -153,12 +155,31 @@ enum Command {
         #[command(subcommand)]
         setting: Setting,
     },
+    /// Install and verify a GPU runtime for text embeddings.
+    #[cfg(target_os = "linux")]
+    SetupGpu {
+        #[command(subcommand)]
+        backend: GpuSetup,
+    },
     #[cfg(target_os = "linux")]
     #[command(hide = true)]
     ServeModel {
         directory: PathBuf,
         #[arg(long)]
         runtime: Option<PathBuf>,
+    },
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Subcommand)]
+enum GpuSetup {
+    /// Set up NVIDIA CUDA in your Semfind data directory.
+    Cuda,
+    /// Set up AMD MIGraphX (requires compatible ROCm libraries).
+    Migraphx {
+        /// Use a compatible local ONNX Runtime MIGraphX wheel.
+        #[arg(long)]
+        wheel: Option<PathBuf>,
     },
 }
 
@@ -329,6 +350,8 @@ fn localized_help(messages: &Messages) -> clap::Command {
         .mut_arg("daemon_idle_seconds", |arg| {
             arg.help(messages.daemon_idle_seconds)
         });
+    #[cfg(target_os = "linux")]
+    let command = command.mut_subcommand("setup-gpu", |sub| sub.about(messages.setup_gpu));
     apply_search_help(command, messages)
         .mut_subcommand("init", |sub| {
             sub.about(messages.init)
@@ -429,6 +452,20 @@ fn run(
     discover_gpu: bool,
     idle_override: Option<NonZeroU32>,
 ) -> Result<()> {
+    #[cfg(target_os = "linux")]
+    if let Some(Command::SetupGpu { backend }) = &cli.command {
+        let (backend, wheel) = match backend {
+            GpuSetup::Cuda => (gpu_setup::Backend::Cuda, None),
+            GpuSetup::Migraphx { wheel } => (gpu_setup::Backend::Migraphx, wheel.as_deref()),
+        };
+        return gpu_setup::install(
+            &data_dir(messages)?.join("runtime"),
+            &cli.python,
+            backend,
+            wheel,
+            output,
+        );
+    }
     if let Some(Command::Config {
         setting: Setting::DaemonIdleSeconds { seconds, reset },
     }) = cli.command
@@ -593,6 +630,20 @@ fn run(
         }) => {
             let mut timing = (time || cli.search.time).then(progress::Timing::start);
             let home = env::var_os("HOME").context(messages.home_required)?;
+            let mut model = start_model()?;
+            #[cfg(target_os = "linux")]
+            if matches!(device, ExecutionDevice::Auto)
+                && model.uses_cpu()
+                && let Some(root) = runtime_dir.as_deref()
+                && gpu_setup::offer_on_init(root, &cli.python, messages)
+            {
+                match start_model() {
+                    Ok(accelerated) => model = accelerated,
+                    Err(error) => {
+                        eprintln!("semfind: {error:#}\nsemfind: {}", messages.gpu_offer_failed)
+                    }
+                }
+            }
             let directory = (!no_caption_images).then(caption_directory).transpose()?;
             let mut captioner = match directory.as_deref() {
                 Some(path) => match open_optional_captioner(
@@ -613,7 +664,6 @@ fn run(
                 None => None,
             };
             let progress = progress::Progress::start(messages);
-            let mut model = start_model()?;
             gpu_hint.show(model.uses_cpu(), progress.is_some());
             let initialize = if force {
                 Index::rebuild_home_with_progress
@@ -717,6 +767,8 @@ fn run(
         )?,
         Some(Command::Config { .. }) => unreachable!(),
         #[cfg(target_os = "linux")]
+        Some(Command::SetupGpu { .. }) => unreachable!(),
+        #[cfg(target_os = "linux")]
         Some(Command::ServeModel { .. }) => unreachable!(),
     }
     Ok(())
@@ -735,9 +787,17 @@ impl GpuHint<'_> {
         self.pending = false;
         let mut stderr = io::stderr().lock();
         let clear = if progress_active { "\r\x1b[K" } else { "" };
+        let (cuda, migraphx) = if cfg!(target_os = "linux") {
+            (
+                "semfind setup-gpu cuda\n                   ",
+                "semfind setup-gpu migraphx\n                   ",
+            )
+        } else {
+            ("", "")
+        };
         let _ = writeln!(
             stderr,
-            "{clear}semfind: {}\nsemfind: {}\n  NVIDIA (CUDA)    https://github.com/Engineer1080/semfind#run-inference-on-an-nvidia-gpu\n  AMD (MIGraphX)   https://github.com/Engineer1080/semfind#amd-gpus",
+            "{clear}semfind: {}\nsemfind: {}\n  NVIDIA (CUDA)    {cuda}https://github.com/Engineer1080/semfind#run-inference-on-an-nvidia-gpu\n  AMD (MIGraphX)   {migraphx}https://github.com/Engineer1080/semfind#amd-gpus",
             self.messages.cpu_hint, self.messages.gpu_setup,
         );
     }

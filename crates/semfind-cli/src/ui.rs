@@ -9,6 +9,8 @@ pub(crate) struct Messages {
     pub unindex: &'static str,
     pub search: &'static str,
     pub config: &'static str,
+    #[cfg(target_os = "linux")]
+    pub setup_gpu: &'static str,
     pub config_daemon_idle: &'static str,
     pub config_reset: &'static str,
     pub config_dir_missing: &'static str,
@@ -37,6 +39,10 @@ pub(crate) struct Messages {
     pub no_daemon: &'static str,
     pub daemon_idle_seconds: &'static str,
     pub gpu_setup: &'static str,
+    #[cfg(target_os = "linux")]
+    pub gpu_offer: &'static str,
+    #[cfg(target_os = "linux")]
+    pub gpu_offer_failed: &'static str,
     pub hint: [&'static str; 2],
     pub status_labels: [&'static str; 6],
     pub report_labels: [&'static str; 4],
@@ -86,6 +92,8 @@ const EN: Messages = Messages {
     unindex: "Remove a directory and its entries from the index.",
     search: "Search explicitly when your query matches a semfind subcommand.",
     config: "Show or change persistent Semfind settings.",
+    #[cfg(target_os = "linux")]
+    setup_gpu: "Install and verify a GPU runtime for text embeddings.",
     config_daemon_idle: "Show or save the background model timeout in seconds.",
     config_reset: "Restore the built-in default.",
     config_dir_missing: "Set XDG_CONFIG_HOME or HOME to locate the configuration directory.",
@@ -114,6 +122,10 @@ const EN: Messages = Messages {
     no_daemon: "Run search inference in this process without the background worker.",
     daemon_idle_seconds: "Stop the background model after this many idle seconds.",
     gpu_setup: "GPU setup instructions",
+    #[cfg(target_os = "linux")]
+    gpu_offer: "Detected {backend}. Install the user-local GPU runtime for faster text embeddings? [y/N]",
+    #[cfg(target_os = "linux")]
+    gpu_offer_failed: "GPU setup did not succeed. Continuing indexing on the CPU.",
     hint: [
         "Find documents by what you remember, apps by what they do, and Linux commands by describing the task.",
         "Run `semfind init` once to set up local search.",
@@ -163,6 +175,8 @@ const DE: Messages = Messages {
     unindex: "Einen Ordner mit seinen Einträgen aus dem Index austragen.",
     search: "Ein Wort suchen, das zugleich ein semfind-Unterbefehl ist.",
     config: "Dauerhafte Semfind-Einstellungen anzeigen oder ändern.",
+    #[cfg(target_os = "linux")]
+    setup_gpu: "Eine GPU-Laufzeit für Text-Embeddings installieren und prüfen.",
     config_daemon_idle: "Leerlaufdauer des Hintergrundprozesses in Sekunden anzeigen oder speichern.",
     config_reset: "Den eingebauten Standardwert wiederherstellen.",
     config_dir_missing: "Setze XDG_CONFIG_HOME oder HOME, damit Semfind das Konfigurationsverzeichnis findet.",
@@ -191,6 +205,10 @@ const DE: Messages = Messages {
     no_daemon: "Das Suchmodell im aktuellen Prozess ohne Hintergrunddienst ausführen.",
     daemon_idle_seconds: "Leerlaufdauer in Sekunden bis zum Beenden des Hintergrundprozesses.",
     gpu_setup: "Anleitungen zur GPU-Einrichtung",
+    #[cfg(target_os = "linux")]
+    gpu_offer: "{backend} erkannt. GPU-Laufzeit für schnellere Text-Embeddings installieren? [j/N]",
+    #[cfg(target_os = "linux")]
+    gpu_offer_failed: "GPU-Einrichtung fehlgeschlagen. Die Indexierung läuft auf der CPU weiter.",
     hint: [
         "Finde Dokumente nach ihrem Inhalt, Programme nach ihrer Funktion und Linux-Befehle, indem du die Aufgabe beschreibst.",
         "Führe einmal `semfind init` aus, um die lokale Suche einzurichten.",
@@ -240,6 +258,8 @@ const RU: Messages = Messages {
     unindex: "Удалить каталог и его записи из индекса.",
     search: "Выполнить поиск, если запрос совпадает с именем подкоманды semfind.",
     config: "Просмотреть или изменить постоянные настройки Semfind.",
+    #[cfg(target_os = "linux")]
+    setup_gpu: "Установить и проверить среду GPU для текстовых эмбеддингов.",
     config_daemon_idle: "Показать или сохранить время простоя фонового процесса в секундах.",
     config_reset: "Восстановить встроенное значение по умолчанию.",
     config_dir_missing: "Задайте XDG_CONFIG_HOME или HOME, чтобы найти каталог настроек.",
@@ -268,6 +288,10 @@ const RU: Messages = Messages {
     no_daemon: "Выполнять поиск в текущем процессе без фоновой службы.",
     daemon_idle_seconds: "Время простоя в секундах до завершения фонового процесса.",
     gpu_setup: "Инструкции по настройке графического процессора",
+    #[cfg(target_os = "linux")]
+    gpu_offer: "Обнаружено {backend}. Установить среду GPU для ускорения текстовых эмбеддингов? [д/Н]",
+    #[cfg(target_os = "linux")]
+    gpu_offer_failed: "Настройка GPU не удалась. Индексация продолжится на ЦП.",
     hint: [
         "Находите документы по содержимому, приложения по назначению, а команды Linux по описанию задачи.",
         "Один раз выполните `semfind init`, чтобы настроить локальный поиск.",
@@ -317,6 +341,8 @@ const PT: Messages = Messages {
     unindex: "Remover uma pasta e suas entradas do índice.",
     search: "Pesquisar um termo que coincida com um subcomando do semfind.",
     config: "Exibir ou alterar as configurações permanentes do Semfind.",
+    #[cfg(target_os = "linux")]
+    setup_gpu: "Instalar e verificar o ambiente de GPU para embeddings de texto.",
     config_daemon_idle: "Exibir ou salvar o tempo de inatividade do processo em segundo plano, em segundos.",
     config_reset: "Restaurar o valor padrão.",
     config_dir_missing: "Defina XDG_CONFIG_HOME ou HOME para localizar o diretório de configuração.",
@@ -345,6 +371,10 @@ const PT: Messages = Messages {
     no_daemon: "Executar o modelo de busca neste processo sem usar o serviço em segundo plano.",
     daemon_idle_seconds: "Tempo de inatividade em segundos antes de encerrar o processo em segundo plano.",
     gpu_setup: "Instruções para configurar a GPU",
+    #[cfg(target_os = "linux")]
+    gpu_offer: "{backend} detectado. Instalar o ambiente de GPU para acelerar os embeddings de texto? [s/N]",
+    #[cfg(target_os = "linux")]
+    gpu_offer_failed: "A configuração da GPU falhou. A indexação continuará na CPU.",
     hint: [
         "Encontre documentos pelo conteúdo, aplicativos pelo que fazem e comandos Linux descrevendo a tarefa.",
         "Execute `semfind init` uma vez para configurar a busca local.",
@@ -394,6 +424,8 @@ const FR: Messages = Messages {
     unindex: "Retirer un dossier et ses entrées de l’index.",
     search: "Rechercher un terme qui correspond au nom d’une sous-commande de semfind.",
     config: "Afficher ou modifier les paramètres persistants de Semfind.",
+    #[cfg(target_os = "linux")]
+    setup_gpu: "Installer et vérifier un environnement GPU pour les embeddings de texte.",
     config_daemon_idle: "Afficher ou enregistrer le délai d’inactivité du processus en arrière-plan, en secondes.",
     config_reset: "Rétablir la valeur par défaut.",
     config_dir_missing: "Définissez XDG_CONFIG_HOME ou HOME pour trouver le répertoire de configuration.",
@@ -422,6 +454,10 @@ const FR: Messages = Messages {
     no_daemon: "Exécuter le modèle de recherche dans ce processus sans service en arrière-plan.",
     daemon_idle_seconds: "Temps d’inactivité en secondes avant l’arrêt du processus en arrière-plan.",
     gpu_setup: "Guides de configuration du GPU",
+    #[cfg(target_os = "linux")]
+    gpu_offer: "{backend} détecté. Installer l’environnement GPU pour accélérer les embeddings de texte ? [o/N]",
+    #[cfg(target_os = "linux")]
+    gpu_offer_failed: "La configuration du GPU a échoué. L’indexation continue sur le processeur.",
     hint: [
         "Retrouvez des documents par leur contenu, des applications par leur fonction et des commandes Linux en décrivant la tâche.",
         "Exécutez `semfind init` une fois pour configurer la recherche locale.",
@@ -471,6 +507,8 @@ const ES: Messages = Messages {
     unindex: "Quitar una carpeta y sus entradas del índice.",
     search: "Buscar un término que coincida con un subcomando de semfind.",
     config: "Mostrar o cambiar los ajustes persistentes de Semfind.",
+    #[cfg(target_os = "linux")]
+    setup_gpu: "Instalar y verificar un entorno de GPU para embeddings de texto.",
     config_daemon_idle: "Mostrar o guardar el tiempo de inactividad del proceso en segundo plano, en segundos.",
     config_reset: "Restaurar el valor predeterminado.",
     config_dir_missing: "Configura XDG_CONFIG_HOME o HOME para localizar el directorio de configuración.",
@@ -499,6 +537,10 @@ const ES: Messages = Messages {
     no_daemon: "Ejecutar el modelo de búsqueda en este proceso sin un servicio en segundo plano.",
     daemon_idle_seconds: "Tiempo de inactividad en segundos antes de detener el proceso en segundo plano.",
     gpu_setup: "Instrucciones para configurar la GPU",
+    #[cfg(target_os = "linux")]
+    gpu_offer: "Se detectó {backend}. ¿Instalar el entorno de GPU para acelerar los embeddings de texto? [s/N]",
+    #[cfg(target_os = "linux")]
+    gpu_offer_failed: "Falló la configuración de la GPU. La indexación continuará en la CPU.",
     hint: [
         "Encuentra documentos por su contenido, aplicaciones por lo que hacen y comandos de Linux describiendo la tarea.",
         "Ejecuta `semfind init` una vez para configurar la búsqueda local.",
@@ -548,6 +590,8 @@ const IT: Messages = Messages {
     unindex: "Rimuovere una cartella e le relative voci dall’indice.",
     search: "Cercare un termine che coincide con un sottocomando di semfind.",
     config: "Mostra o modifica le impostazioni permanenti di Semfind.",
+    #[cfg(target_os = "linux")]
+    setup_gpu: "Installa e verifica un ambiente GPU per gli embedding di testo.",
     config_daemon_idle: "Mostra o salva il tempo di inattività del processo in background, in secondi.",
     config_reset: "Ripristina il valore predefinito.",
     config_dir_missing: "Imposta XDG_CONFIG_HOME o HOME per individuare la directory di configurazione.",
@@ -576,6 +620,10 @@ const IT: Messages = Messages {
     no_daemon: "Esegui il modello di ricerca in questo processo senza un servizio in background.",
     daemon_idle_seconds: "Tempo di inattività in secondi prima di arrestare il processo in background.",
     gpu_setup: "Guide per configurare la GPU",
+    #[cfg(target_os = "linux")]
+    gpu_offer: "Rilevato {backend}. Installare l’ambiente GPU per accelerare gli embedding di testo? [s/N]",
+    #[cfg(target_os = "linux")]
+    gpu_offer_failed: "Configurazione della GPU non riuscita. L’indicizzazione continua sulla CPU.",
     hint: [
         "Trova documenti in base al contenuto, applicazioni in base alla funzione e comandi Linux descrivendo l’operazione.",
         "Esegui `semfind init` una volta per configurare la ricerca locale.",

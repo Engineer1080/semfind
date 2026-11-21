@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- Add `semfind setup-gpu cuda` and `semfind setup-gpu migraphx` to install and verify local GPU runtimes for text embeddings.
+- Offer GPU runtime setup before interactive `semfind init` when automatic selection falls back to the CPU and a suitable graphics driver is detected.
+- Show the CUDA and MIGraphX setup commands in the CPU performance tip on Linux.
+
 ## 0.3.0
 
 - Use compatible PyTorch CUDA or ROCm devices for Florence-2 captioning by default. Retry on the CPU if GPU inference fails and report the caption backend with `init --time`. Existing captions are reused across backends.

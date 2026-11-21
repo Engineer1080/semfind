@@ -35,6 +35,54 @@ fn has_init_hint(output: &Output) -> bool {
     String::from_utf8_lossy(&output.stderr).contains("Run `semfind init`")
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn gpu_setup_registers_only_verified_runtimes() -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempfile::tempdir()?;
+    let python = temp.path().join("python-fixture");
+    fs::write(
+        &python,
+        r#"#!/bin/sh
+case "$2:$3" in
+    -m:venv)
+        mkdir -p "$4/bin"
+        ln -s "$0" "$4/bin/python"
+        ;;
+    -m:pip) exit 0 ;;
+    -c:*) [ "$4" = CUDAExecutionProvider ] && [ "$VERIFY" = yes ] ;;
+    *) exit 2 ;;
+esac
+"#,
+    )?;
+    fs::set_permissions(&python, fs::Permissions::from_mode(0o700))?;
+    let index = temp.path().join("index");
+    let data = temp.path().join("data");
+    let runtime = data.join("semfind/runtime");
+    let setup = |verify| {
+        let mut command = cli(&index);
+        command
+            .env("XDG_DATA_HOME", &data)
+            .env("VERIFY", verify)
+            .arg("--python")
+            .arg(&python)
+            .args(["setup-gpu", "cuda"]);
+        command
+    };
+    assert_eq!(setup("no").output()?.status.code(), Some(1));
+    assert_eq!(fs::read_dir(&runtime)?.count(), 0);
+    let destination = runtime.join("cuda");
+    success(setup("yes").output()?)?;
+    let environment = fs::read_link(&destination)?;
+    assert!(destination.join("bin/python").is_file());
+    success(setup("yes").output()?)?;
+    assert_eq!(fs::read_link(&destination)?, environment);
+    assert_eq!(fs::read_dir(&runtime)?.count(), 2);
+    assert!(!index.exists());
+    Ok(())
+}
+
 #[test]
 fn status_json_and_usage_exit_codes() -> Result<()> {
     let temp = tempfile::tempdir()?;
@@ -719,21 +767,27 @@ fn real_model_init_indexes_home_desktop_applications_and_manuals() -> Result<()>
     assert_eq!(failed_rebuild.status.code(), Some(1));
     let query = ["--device", "cpu", "notes.txt", "--limit", "1", "--json"];
     let search = command().args(query).output()?;
-    assert_eq!(
-        String::from_utf8_lossy(&search.stderr)
-            .matches("GPU setup instructions")
-            .count(),
-        1
-    );
+    let hint = String::from_utf8_lossy(&search.stderr);
+    assert_eq!(hint.matches("GPU setup instructions").count(), 1);
+    #[cfg(target_os = "linux")]
+    for backend in ["cuda", "migraphx"] {
+        assert_eq!(
+            hint.matches(&format!("semfind setup-gpu {backend}"))
+                .count(),
+            1
+        );
+    }
     let search_output = success(search)?;
     let quiet = command().args(query).arg("--no-gpu-hint").output()?;
     assert!(!String::from_utf8_lossy(&quiet.stderr).contains("GPU setup instructions"));
+    assert!(!String::from_utf8_lossy(&quiet.stderr).contains("semfind setup-gpu"));
     assert_eq!(success(quiet)?, search_output);
     let quiet_env = command()
         .env("SEMFIND_NO_GPU_HINT", "true")
         .args(query)
         .output()?;
     assert!(!String::from_utf8_lossy(&quiet_env.stderr).contains("GPU setup instructions"));
+    assert!(!String::from_utf8_lossy(&quiet_env.stderr).contains("semfind setup-gpu"));
     assert_eq!(success(quiet_env)?, search_output);
     let hits: Vec<Hit> = serde_json::from_slice(&search_output)?;
     assert_eq!(hits[0].snippet, "Document available for search");
