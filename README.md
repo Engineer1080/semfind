@@ -88,18 +88,6 @@ Dependencies and the model are downloaded during setup. The default Granite FP32
 
 `cargo install` installs the `semfind` command in `$HOME/.cargo/bin` by default. For later terminal sessions, keep that directory on `PATH` and set `SEMFIND_PYTHON` to the absolute path of the virtual environment's Python interpreter.
 
-### Upgrade an existing E5 installation
-
-Existing E5 indexes still use their original model from the previous default model directory. Explicit `--model-dir` and `SEMFIND_MODEL_DIR` settings still take priority. To switch to Granite, download it and build a fresh index in a separate directory.
-
-```bash
-python scripts/download_model.py
-export SEMFIND_INDEX_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/semfind/index-granite"
-semfind init
-```
-
-If you previously set `SEMFIND_MODEL_DIR` to E5, unset it for these commands or point it to the Granite download directory. Keep the new index setting for later searches. Reapply any home exclusions, or use `semfind index /path/to/folder` to index selected directories.
-
 ### Choose an embedding model
 
 The CLI and downloader accept `granite-97m`, `granite-311m`, `e5-small`, and `e5-large` with `--model` or `SEMFIND_MODEL`. Granite 97M is the default for new indexes. Compare the models in the [retrieval benchmark](benchmarks/retrieval/README.md).
