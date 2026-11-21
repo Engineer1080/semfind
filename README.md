@@ -1,284 +1,118 @@
 # semfind
 
-**Semfind is an offline semantic search CLI for Linux.** Describe what you want to find in everyday language. Semfind searches file contents, installed applications, COSMIC settings, and Linux commands. Use `--json` for structured results in scripts, applications, and AI agents.
+**Semfind is an offline semantic search CLI for Linux.** Describe what you want to find to search files by content, installed apps by purpose, and Linux commands by task. Multilingual search matches by meaning and combines those matches with full-text search and exact identifiers. The model and index stay on your machine after setup. [Privacy and local data](docs/privacy.md)
 
-Semfind uses local multilingual embeddings to match queries by meaning. A German question can retrieve an English document. It combines semantic similarity with full-text search and gives priority to exact filenames, settings IDs, and error codes.
+A German question about how long to keep personal data finds the matching passage in an English sample document. Shortened terminal output from the [sample index](#try-it) is shown below.
 
-## What works
-
-- Manual indexing of selected directories and a curated, multilingual COSMIC settings catalog.
-- On Linux, `semfind init` indexes your home directory, registered desktop applications, local command manuals, and the built-in catalogs.
-- A multilingual Linux command catalog with runnable examples and Debian and Arch package-management variants.
-- Indexing of installed manual pages and executable filenames from `PATH` through `semfind init` or `semfind index --manpages`.
-- Search across UTF-8 text, Markdown, logs, CSV, reStructuredText, and PDFs with a text layer.
-- Local Granite Embedding 97M Multilingual R2 embeddings, SQLite FTS5, and hybrid ranking with one result per indexed source.
-- Filters for folder, file extension, file kind (text, image, video), and result category. JSON for scripting.
-- With Florence-2 set up, `semfind init` makes JPEG, PNG, and WebP images searchable by subject alongside documents.
-- Incremental rescans that recalculate embeddings only for changed content. Saved directory exclusions and manual index removal.
-- An optional COSMIC Launcher plugin searches the same index. [Installation and usage](integrations/cosmic/README.md)
-- Optional KDE Plasma 6, GNOME Shell, Cinnamon, and Rofi adapters use the same index. [Installation and usage](integrations/desktop/README.md)
-
-The CLI works independently of the desktop environment. Pop!_OS 24.04 is one of the [tested environments](docs/verification.md). See the [roadmap](docs/roadmap.md) for planned desktop integrations and other work.
-
-## Use semfind from programs and AI agents
-
-Call semfind as a subprocess to find local sources for a natural-language question. `--category`, `--path`, and `--limit` narrow the results before the caller opens a file or consults a manual. The index and model run locally after setup.
-
-```bash
-semfind "How do I show free disk space?" --category command --limit 3 --json
+```console
+$ semfind "Wie lange sollen personenbezogene Daten gespeichert werden?" --category file --limit 1
+[file] data-retention.md  (0.0164)
+  …/examples/documents/data-retention.md:1-5
+  # Data retention and lawful processing An organization should collect only the personal information it needs for a specified purpose. …
 ```
 
-This query can return `df` with the example `df -h`. For file results, the JSON includes the source path and a matching text excerpt that a program or agent can use to inspect the original file. Use `semfind status --json` to check which directories are indexed.
+## Quickstart
 
-File results can also include a `location` for the passage behind the snippet. Text files use one-based, inclusive line numbers such as `{"line_start":12,"line_end":17}`. PDFs use a one-based physical page number such as `{"page":3}`. The terminal shows these as `notes.md:12-17` or `report.pdf#page=3`. The JSON field is optional.
+<a name="install-on-pop_os-2404"></a>
 
-Existing indexes remain searchable after Semfind 0.2.1 automatically upgrades them to schema 5. Use 0.2.1 or newer with an upgraded index. Run `semfind index /path/to/folder` for each indexed folder, or `semfind init` for a home index, to add locations. The first scan after the upgrade reprocesses previously indexed text files and PDFs. Locations refer to the indexed text and refresh on rescan.
+### Install from source on Linux
 
-With `--json`, search writes a JSON array to stdout, including `[]` for zero results. Diagnostics go to stderr. Exit codes are `0` for success (including zero hits), `1` for an operational error, and `2` for invalid CLI usage.
+Install the system packages for your distribution. The build needs a C toolchain, and PDF search uses `pdftotext`.
 
-Add `--time` to report the search duration in milliseconds on stderr. Measurement starts after the index is opened and includes model startup when needed, retrieval, and ranking. Result formatting is outside the measurement.
+| Distribution | System packages |
+| --- | --- |
+| Ubuntu 24.04 and Pop!_OS 24.04 | `sudo apt install git build-essential python3.12-venv poppler-utils` |
+| Debian | `sudo apt install git build-essential poppler-utils` |
+| Fedora | `sudo dnf install git gcc glibc-devel poppler-utils` |
+| Arch Linux (up to date) | `sudo pacman -S --needed git base-devel poppler` |
 
-On Linux, standalone searches in automatic mode can reuse the last query embedding from the selected index directory. Semfind still ranks the current index and checks that file hits are accessible. `--time` reports a cache hit, and `--no-cache` skips reading and saving the cached embedding for one invocation.
+For other distributions, install Git, a C compiler and linker, and `pdftotext` through your package manager. The steps below use Rust 1.93 or newer and Python 3.12. Install Rust through [rustup](https://rustup.rs/) if needed. Run the build and Python setup as your regular user.
 
-When a standalone search needs a new embedding, Semfind on Linux starts a local background worker on demand. By default, the worker keeps the selected model loaded for 15 minutes after the last embedding. It uses automatic CUDA, MIGraphX, and CPU selection. `--time` shows `ONNX Runtime (resident)` when a search uses an already loaded model.
+If Python 3.12 with `venv` is unavailable, install [uv](https://docs.astral.sh/uv/getting-started/installation/) and run `uv venv --python 3.12 --seed .venv` in place of the `python3.12 -m venv .venv` line. By default, `uv` downloads Python 3.12 if needed and creates the environment without changing your system Python.
 
-Save a five-minute timeout for future searches, show the saved value, or restore the 15-minute default.
-
-```bash
-semfind config daemon-idle-seconds 300
-semfind config daemon-idle-seconds
-semfind config daemon-idle-seconds --reset
-```
-
-Semfind stores this setting in `$XDG_CONFIG_HOME/semfind/daemon-idle-seconds` (by default `~/.config/semfind/daemon-idle-seconds`). The value survives a restart. The `--daemon-idle-seconds` flag takes precedence over `SEMFIND_DAEMON_IDLE_SECONDS`, which takes precedence over the saved value. The worker uses the setting when it computes the next embedding. A cached query leaves the current timer running. Use `--no-cache` to compute a new embedding for a repeated query.
-
-Use `--no-daemon` or `SEMFIND_NO_DAEMON=true` to run inference directly. Semfind also runs inference directly when you select CPU, CUDA, or MIGraphX explicitly, pass `--python`, or when the worker is unavailable. For cold-start comparisons, combine `--no-daemon` with `--no-cache`.
+Ubuntu 24.04 is the CI environment and Pop!_OS 24.04 is the locally tested Linux reference. The package commands for Debian, Fedora, and Arch are provided as starting points. See the [verification notes](docs/verification.md) for what has been tested.
 
 ```bash
-semfind "How do I show free disk space?" --category command --json --time
-```
-
-### Run multiple searches in one process
-
-```bash
-printf '%s\n' 'How do I show free disk space?' 'How do I find files by name?' |
-  semfind search --stdin --category command --limit 3 --time
-```
-
-`--stdin` reads one plain UTF-8 query per line and ignores blank lines. It writes and flushes one JSON result array for each query in input order, including `[]` for zero hits. Applications can send another query after reading the previous result while keeping stdin open. All queries share the same filters. The process opens the index once and reuses the model worker after the first query that requires embeddings.
-
-`--time` reports each query's duration on stderr. Closing stdin ends the session. If a query or input line fails, semfind reports its line number on stderr and exits with code `1`. Results already emitted remain valid.
-
-## Install on Pop!_OS 24.04
-
-With this source directory open in a terminal, install Rust 1.93 or newer through [rustup](https://rustup.rs/) and run the following with the system Python 3.12. System package installation uses sudo. Build, indexing and search run as your regular user.
-
-```bash
-sudo apt install build-essential python3-venv poppler-utils
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python scripts/download_model.py
+git clone https://github.com/Engineer1080/semfind.git
+cd semfind
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python scripts/download_model.py
 cargo install --locked --path crates/semfind-cli
 export PATH="$HOME/.cargo/bin:$PATH"
-export SEMFIND_PYTHON="$VIRTUAL_ENV/bin/python"
+export SEMFIND_PYTHON="$PWD/.venv/bin/python"
 ```
 
-Dependencies and the model are downloaded during setup. The default Granite FP32 model and tokenizer take about 415 MB on disk. The downloader verifies SHA-256 checksums against a fixed model revision. Subsequent indexing and search read the model from disk. Use `python scripts/download_model.py --model e5-small` to download E5 Small, optionally with `--variant int8` for compatible CPUs. Use a separate model and index directory when changing variants.
+Setup downloads the dependencies and the default Granite 97M Multilingual R2 model. The model and tokenizer take about 415 MB on disk. For new terminals, keep `$HOME/.cargo/bin` on your `PATH` and set `SEMFIND_PYTHON` to the absolute path of the virtual environment's Python interpreter.
 
-`cargo install` installs the `semfind` command in `$HOME/.cargo/bin` by default. For later terminal sessions, keep that directory on `PATH` and set `SEMFIND_PYTHON` to the absolute path of the virtual environment's Python interpreter.
+### Try it
 
-### Choose an embedding model
-
-The CLI and downloader accept `granite-97m`, `granite-311m`, `e5-small`, and `e5-large` with `--model` or `SEMFIND_MODEL`. Granite 97M is the default for new indexes. Compare the models in the [retrieval benchmark](benchmarks/retrieval/README.md).
+From the repository root, index the included [sample documents](examples/documents) and run the search above. The example uses a separate index under `target/` and scans only the sample directory for files. You may see a reminder to run `semfind init` when using the sample index.
 
 ```bash
-export SEMFIND_MODEL=granite-311m
-export SEMFIND_INDEX_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/semfind/index-granite-311m"
-python scripts/download_model.py
+semfind --index-dir ./target/semfind-demo-index index ./examples/documents
+semfind --index-dir ./target/semfind-demo-index "Wie lange sollen personenbezogene Daten gespeichert werden?" --category file --limit 1
+```
+
+For everyday use, `semfind init` indexes supported files under your home directory, registered desktop applications, local command manuals, and the built-in catalogs. The first scan can take a while. In an interactive terminal, Semfind reports progress as it scans.
+
+```bash
 semfind init
-semfind 'How do I find files modified today?'
-```
-
-Keep the same model and index settings for subsequent searches. To change models or weights, use a new index directory or rebuild the current index with `semfind init --force`. Each index records the exact embedding identity and refuses to combine incompatible vectors.
-
-#### Use your own model
-
-Set `--model-dir` or `SEMFIND_MODEL_DIR` to a local directory. Use this setting by itself in place of `--model` and `SEMFIND_MODEL`. Supply `model.onnx`, a Hugging Face `tokenizer.json` with batch padding configured, and a `semfind-model.json` describing the encoder. For an ONNX export with external data, use a single sidecar named `model.onnx_data`.
-
-```json
-{
-  "pooling": "mean",
-  "output": "last_hidden_state",
-  "max_tokens": 512,
-  "query_prefix": "query: ",
-  "passage_prefix": "passage: ",
-  "minimum_similarity": 0.80
-}
-```
-
-`pooling` is required. Use `mean` for attention-masked mean pooling, `cls` for the first token, or `sentence` for an already pooled output of shape `[batch, dimensions]`. The other settings are optional. The default output name is `last_hidden_state`, the token limit is 512, prefixes are empty, and the similarity cutoff is disabled unless specified. The ONNX graph must run on CPU with batched INT64 inputs named `input_ids`, `attention_mask`, or `token_type_ids` and produce one vector of up to 4096 dimensions per input after pooling.
-
-Changes to the weights, tokenizer, or encoding settings require a full rebuild or a separate index. You can adjust the similarity cutoff without reindexing.
-
-### Run inference on an NVIDIA GPU
-
-Check that `nvidia-smi` can see the GPU. The command below installs the user-local ONNX Runtime with CUDA and cuDNN libraries, runs an inference check, and then registers it for automatic discovery. It requires an NVIDIA driver that supports CUDA 13. [ONNX Runtime CUDA requirements](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html#requirements)
-
-```bash
-semfind setup-gpu cuda
-semfind init --time
-```
-
-With the default `--device auto`, search and indexing first try dedicated text embedding runtimes in `runtime/cuda` and `runtime/migraphx` under the Semfind data directory, in that order. You can symlink either directory to an existing virtual environment. If neither dedicated GPU starts, Semfind uses its configured Python environment and tries CUDA, MIGraphX, then CPU as available. A GPU inference error in automatic mode retries on the CPU. `--time` reports the provider selected when the embedding model starts. Florence-2 uses [separate PyTorch runtimes for captioning](#search-images-by-subject).
-
-Before indexing, interactive `semfind init` offers to install a missing GPU runtime if automatic selection falls back to the CPU and Semfind detects a GPU with a bound NVIDIA or AMD driver. Press Enter to decline. A failed installation also continues on the CPU. Non-interactive runs, an explicit `--python`, and direct selections of CPU, CUDA, or MIGraphX skip the prompt.
-
-When a search or indexing command uses the CPU for text embeddings, Semfind prints a performance tip on stderr once per invocation. On Linux it includes the CUDA and MIGraphX setup commands and links to the prerequisites for each backend. Use `--no-gpu-hint` to suppress it for one invocation, or set `SEMFIND_NO_GPU_HINT=true` for your environment.
-
-Use `--python` to select a specific interpreter for one invocation. `SEMFIND_PYTHON` sets the default interpreter, including the fallback in automatic mode. Use `--device cpu` to force CPU inference or `--device cuda` to require CUDA in the selected interpreter. You can also set `SEMFIND_DEVICE`. The same model and weights can reuse an index on another backend. Tokenization, filesystem scanning, SQLite, and search ranking run on the CPU. On the tested RTX 4080 SUPER, CUDA sped up index building and searches with a running model worker. A cold CUDA session took longer to start than a CPU session. Automatic searches can now reuse a running session across invocations. [CPU and CUDA benchmark](benchmarks/retrieval/README.md#granite-97m-cpu-and-cuda-results)
-
-### AMD GPUs
-
-Semfind supports AMD MIGraphX experimentally. Install compatible ROCm and MIGraphX system libraries for your GPU and distribution first. The default setup uses AMD's ONNX Runtime wheel for ROCm 7.2.1 with Python 3.12 on x86_64. For a different supported ROCm and Python combination, pass a compatible local AMD wheel using `semfind setup-gpu migraphx --wheel /path/to/onnxruntime_migraphx.whl`. [AMD installation and compatibility](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/installrad/native_linux/install-onnx.html) · [MIGraphX wheel matrix](https://onnxruntime.ai/docs/execution-providers/MIGraphX-ExecutionProvider.html#requirements)
-
-```bash
-semfind setup-gpu migraphx
-semfind init --time
-```
-
-Both setup commands install the Python runtime for text embeddings under the Semfind data directory. Run them as your regular user. The NVIDIA driver and AMD system libraries are managed by your distribution. If a runtime is already registered, the setup command checks it in place. Florence-2 has its own PyTorch setup. The explicit `--device migraphx` setting reports an error if the provider cannot start or inference fails. With the default `--device auto`, Semfind falls back to the CPU if GPU inference fails. Granite 97M execution and performance on AMD hardware still need verification.
-
-## Try it
-
-On Linux, run `semfind init` after setup to index your home directory, desktop applications, and local command manuals. The first scan can take time on a large home directory or a system with many manuals.
-In an interactive terminal, `init` shows the current phase, elapsed time, and the number of supported files found so far. The final summary reports how many entries were written, unchanged, removed, or skipped.
-Use `semfind init --time` to report the total duration and the time spent in each phase on stderr. Combine it with `--force` to measure a complete rebuild. Timing covers model preparation through saving the index, in seconds.
-Status, indexing, and search commands print a setup reminder on stderr until `init` succeeds for the selected index.
-
-```bash
-semfind init --exclude node_modules
-semfind "Screenshots bearbeiten" --category application
-semfind "Ein Programm zum Chatten"
+semfind "Edit screenshots" --category application --limit 3
+semfind "How do I find the biggest directories?" --category command --limit 3
 semfind status
 ```
 
-Run `semfind init` again to refresh the home directory, desktop applications, and local commands. Home exclusions follow the same rules as `semfind index`. If a saved root overlaps your home directory, use `semfind unindex` with that root before adopting the whole home directory. Reapply any exclusions you want to keep.
+Use `semfind index ~/Documents` to scan only a chosen folder. The [search guide](docs/search.md) covers exclusions, rescans, command examples for Debian and Arch, and filters such as `--path`, `--type`, and `--kind`.
 
-Queries that explicitly ask for an application, such as `Ein Programm zum Chatten` or `An app for chatting`, search installed applications by the task described. Exact names and explicit filters take precedence.
+## Desktop integrations
 
-Run `semfind init --force` to rebuild the selected index from scratch. It rescans the home directory and all registered directories with their saved exclusions. It also rebuilds the desktop application, settings, and command catalogs. All registered directories must be accessible. Semfind writes the rebuilt index in one transaction and rolls back if the rebuild fails. The final report counts the replaced entries as removed and the newly indexed entries as written.
+The CLI works independently of your desktop. These optional integrations search the same local index.
 
-During a forced rebuild, configured Florence-2 captioning applies to all scanned directories. With `--no-caption-images` or without a local Florence-2 model, the rebuilt index stores image filenames and paths. To switch the embedding model in place, select the new model when running `init --force` and use the same selection for searches.
+| Desktop or launcher | Search interface | Setup |
+| --- | --- | --- |
+| COSMIC | COSMIC Launcher | [COSMIC plugin](integrations/cosmic/README.md) |
+| KDE Plasma 6 | KRunner | [Plasma adapter](integrations/desktop/README.md#kde-plasma-6) |
+| GNOME | GNOME Shell Activities search | [GNOME search provider](integrations/desktop/README.md#gnome-shell) |
+| Cinnamon | Cinnamon menu search | [Cinnamon search provider](integrations/desktop/README.md#cinnamon) |
+| Rofi | Rofi search window on Xfce, LXQt, MATE, and other desktops | [Rofi adapter](integrations/desktop/README.md#rofi-on-xfce-lxqt-mate-and-other-desktops) |
 
-To start with a smaller index, select a directory instead.
+Semfind includes a built-in COSMIC settings catalog. The COSMIC plugin can open supported settings pages. See the [verification notes](docs/verification.md) for tested environments.
 
-```bash
-semfind index ./examples/documents
-semfind "Wie lange sollen personenbezogene Daten gespeichert werden?" --type md
-semfind "Mein Bildschirm ist zu dunkel" --category settings
-semfind "E-0042" --type log --json
-semfind status --json
-```
+## Use Semfind from programs and AI agents
 
-### Languages
-
-Terminal help, setup reminders, and status labels are available in English, German, Russian, Portuguese, French, Spanish, and Italian. semfind uses the configured message locale. It reads `LC_ALL`, `LC_MESSAGES`, and `LANG` in that order, with `LANGUAGE` preferences for non-`C` locales. The command names, flags, and JSON fields use stable identifiers.
+Use `--json` to get a result array on stdout. File hits include paths and text excerpts, with line or page references when available. Command hits can include examples such as `df -h`. Semfind writes diagnostics to stderr.
 
 ```bash
-LC_ALL=fr_FR.UTF-8 semfind --help
-semfind "Comment installer un nouveau paquet ?" --category command
+semfind "How do I show free disk space?" --category command --limit 1 --json
 ```
 
-The built-in command and COSMIC catalogs index descriptions in all seven languages. Run `semfind index` to add the translations to an existing catalog. Run `semfind init` to refresh translated desktop application metadata and local manuals when available. The five additional languages were selected from voluntarily reported desktop locales, grouped by language. [Linux Hardware Trends](https://github.com/linuxhw/Trends/blob/master/Desktop/README.md#os-lang)
+The [scripting guide](docs/scripting.md) covers exit codes, batch queries with `--stdin`, timing with `--time`, and the model worker's configurable idle timeout.
 
-### Find Linux commands
+## Optional setup
 
-Run `semfind index` to load the built-in command and settings catalogs without scanning personal folders. Both `semfind init` and directory indexing also refresh the command catalog.
+### Run inference on an NVIDIA GPU
 
-```bash
-semfind index
-semfind "Welche Ordner belegen am meisten Speicherplatz?" --category command
-semfind "Wie installiere ich ein neues Paket?" --category command --distro debian
-semfind "Wie installiere ich ein neues Paket?" --category command --distro arch --json
-```
+Semfind automatically tries available GPU runtimes and falls back to the CPU. For NVIDIA prerequisites and the `semfind setup-gpu cuda` command, see the [CUDA setup guide](docs/gpu.md#run-inference-on-an-nvidia-gpu).
 
-The CLI looks up the current distribution family in `os-release`. Debian, Ubuntu, Pop!_OS, and distributions with compatible IDs get Debian examples. Arch and its recognized derivatives get Arch examples. Other systems get generic Linux examples. Use `--distro debian`, `--distro arch`, or `--distro generic` to override the detection. Generic commands are included for both families. Examples are displayed as text, and command results include `distro` and `example` in JSON output. See the [APT manual](https://manpages.debian.org/stable/apt/apt.8.en.html) and the [pacman manual](https://man.archlinux.org/man/pacman.8.en) for package management syntax.
+### AMD GPUs
 
-On Linux, `semfind init` includes the commands available on your machine. To refresh the command catalog on its own, run `semfind index --manpages`.
-
-```bash
-semfind index --manpages
-semfind "Wie prüfe ich, ob zwei Dateien Byte für Byte gleich sind?" --category command
-```
-
-This scans manual sections 1, 6, and 8 from the configured manual path. It indexes the name, synopsis, and a short description where available. Install `man-db` for your system's configured `manpath` and for opening results with `man`. Compressed pages use the installed `gzip`, `xz`, `bzip2`, or `zstd` helper. Executable files from absolute `PATH` directories without a manual entry are searchable by name. Shell aliases, functions, and built-ins need an installed manual page to appear.
-
-The first scan can take a minute or more on a large system. Run `semfind index --manpages` again after installing or removing packages. When you select another distribution, search uses the built-in catalog for that distribution. See the [manpath manual](https://manpages.debian.org/stable/man-db/manpath.1.en.html).
-
-### Filter and manage indexed files
-
-```bash
-semfind "Sommerurlaub" --kind image
-semfind --kind video --path "$HOME/Videos"
-semfind "Datenschutz" --kind text --type pdf
-```
-
-`--kind` groups file extensions and can list indexed files without a query. Images are searchable by filename and path, and captioned images are also searchable by subject. Videos are searchable by filename and path. Listing files and searching filenames in an index with no matching embeddings work without loading the model.
-
-```bash
-semfind index "$HOME/Documents" --exclude Private --exclude Archive/taxes
-semfind "Probleme mit meinem Vermieter" --type pdf --path "$HOME/Documents"
-semfind index "$HOME/Documents"  # rescan with the saved exclusions
-semfind unindex "$HOME/Documents"
-```
-
-Passing exclusions replaces the saved list for that root. Use `--clear-excludes` to clear it. Quote multiword queries. Use `semfind search "status"` to search for a semfind subcommand name.
-
-Local data defaults to `${XDG_DATA_HOME:-$HOME/.local/share}/semfind`. Set `SEMFIND_MODEL_DIR` and `SEMFIND_INDEX_DIR` to use other locations. The index directory must be private on Linux.
+Experimental MIGraphX support requires compatible system libraries. See the [AMD setup guide](docs/gpu.md#amd-gpus) for prerequisites and the `semfind setup-gpu migraphx` command.
 
 ### Search images by subject
 
-Once Florence-2 is set up locally, `semfind init` automatically generates English descriptions of supported JPEG, PNG, and WebP files in your home directory. Semfind indexes the captions as text alongside document passages. The same search can return both, while `--kind image` limits it to pictures. Semfind includes the generated description in the result snippet.
+With Florence-2 set up locally, Semfind can search supported JPEG, PNG, and WebP images by their generated descriptions alongside documents. See the [image search guide](docs/models.md#search-images-by-subject).
 
-From the repository root, add the optional dependencies to the Python environment selected during setup. The [Florence-2 Base FT checkpoint](https://huggingface.co/florence-community/Florence-2-base-ft) download is about 470 MB.
+### Choose an embedding model
 
-```bash
-"$SEMFIND_PYTHON" -m pip install 'torch==2.14.1' 'torchvision==0.29.1' --index-url https://download.pytorch.org/whl/cpu
-"$SEMFIND_PYTHON" -m pip install 'transformers==5.23.0' 'Pillow==13.0.0'
-"$SEMFIND_PYTHON" scripts/download_model.py --model florence-2
-semfind init
-semfind "Katze auf dem Sofa" --json
-semfind "Katze auf dem Sofa" --kind image --json
-```
-
-Florence-2 runs locally and automatically uses a compatible PyTorch GPU when available. Semfind tries dedicated runtimes in `runtime/florence-cuda` and `runtime/florence-rocm` under the Semfind data directory, then checks the configured Python environment. If GPU captioning fails, Semfind retries on the CPU. `--device cpu` forces CPU captioning, and `--python` uses the chosen interpreter for device detection. `semfind init --time` reports the Florence-2 backend separately when it generates captions.
-
-For an NVIDIA GPU with a CUDA 13-capable driver, create a dedicated Florence-2 runtime:
-
-```bash
-florence_runtime="${XDG_DATA_HOME:-$HOME/.local/share}/semfind/runtime/florence-cuda"
-python3 -m venv "$florence_runtime"
-"$florence_runtime/bin/python" -m pip install 'torch==2.14.1' 'torchvision==0.29.1' --index-url https://download.pytorch.org/whl/cu130
-"$florence_runtime/bin/python" -m pip install 'transformers==5.23.0' 'Pillow==13.0.0'
-```
-
-For AMD GPUs, use a [PyTorch ROCm build](https://pytorch.org/get-started/locally/) in `runtime/florence-rocm` and install the same Transformers and Pillow dependencies. The Florence-2 checkpoint is shared between backends.
-
-In a local check with Florence-2 Base FT, the median time to describe one repeated test image after warmup was 3.01 s on a Ryzen 7 5800X3D and 0.15 s on a GeForce RTX 4080 SUPER with CUDA. Both backends produced the same description for that image. The timing excludes model startup and index updates. ROCm still needs hardware verification.
-
-The first run can take longer for large photo collections. Subsequent scans generate captions for new or changed images, or when the caption model changes. If Florence-2 is unavailable during `init`, Semfind keeps the captions it already has and indexes new images by filename and path. Use `semfind init --no-caption-images` to skip captioning for one run.
-
-Use `semfind index ROOT --caption-images` to explicitly caption images in a separate indexed root. Use `SEMFIND_CAPTION_MODEL_DIR` or `--caption-model-dir` for another local checkpoint directory. Deleting an image or unindexing its root removes its caption. Unreadable image contents fall back to filename and path search when the file itself remains accessible. Caption extraction limits images to 16 MiB and 40 million pixels.
+Granite 97M is the default for new indexes. See the [model guide](docs/models.md#choose-an-embedding-model) for alternative downloads and custom ONNX models, and the [retrieval benchmarks](benchmarks/retrieval/README.md) for comparisons.
 
 ## Architecture and limits
 
-The Rust CLI calls the same library that future clients will use. The core stages reads, extracts text, and stores passages and vectors in a single SQLite transaction. A local worker runs the embedding model through ONNX Runtime on the CPU or with NVIDIA CUDA or AMD MIGraphX. Query-time cosine similarity and FTS5's BM25 rankings are fused with Reciprocal Rank Fusion. See [architecture](docs/architecture.md) and [privacy](docs/privacy.md).
-
-Semfind is intended for small collections. Exact cosine search scales linearly with the number of passages. Semantic hits use a model-specific cosine similarity cutoff. Literal and full-text matching still apply at any similarity. Scanned PDFs require a text layer. Settings results carry catalog metadata.
+Semfind uses SQLite FTS5 and embeddings from a local ONNX Runtime worker. It combines keyword and semantic rankings. Exact vector search scales linearly with the number of indexed passages. PDF search requires a text layer. See the [architecture](docs/architecture.md) and [roadmap](docs/roadmap.md).
 
 ## Contribute
 
-Run `cargo fmt --all --check`, `cargo clippy --locked --workspace --all-targets -- -D warnings`, and `cargo test --locked --workspace`. See [contributing](CONTRIBUTING.md) for the real-model test and review guidelines.
+Run `cargo fmt --all --check`, `cargo clippy --locked --workspace --all-targets -- -D warnings`, and `cargo test --locked --workspace`. See the [contributing guide](CONTRIBUTING.md) for testing with real models.
 
-Code is [Apache-2.0 licensed](LICENSE). The [default Granite model](https://huggingface.co/ibm-granite/granite-embedding-97m-multilingual-r2) is also Apache-2.0 licensed and downloaded separately. See [dependencies and model provenance](docs/dependencies.md).
+Semfind and its default Granite model are Apache-2.0 licensed. See the [license](LICENSE) and [dependency and model provenance](docs/dependencies.md).

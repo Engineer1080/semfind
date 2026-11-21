@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+- Add a Linux Quickstart with a verified cross-language search, a separate sample index, and steps to index your own files and applications.
+- Document system packages for Pop!_OS, Ubuntu, Debian, Fedora, and Arch Linux. Explain how `uv` can download Python 3.12 when needed.
+- List the COSMIC, KDE Plasma, GNOME, Cinnamon, and Rofi integrations together and link to dedicated guides for scripting, indexing, models, image search, and GPU setup.
+
 ## 0.3.1
 
 - Add `semfind setup-gpu cuda` and `semfind setup-gpu migraphx` to install and verify local GPU runtimes for text embeddings.
