@@ -3,10 +3,12 @@
 
 import argparse
 import gzip
+import io
 from pathlib import Path
 import re
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import xml.etree.ElementTree as ET
 
@@ -53,7 +55,17 @@ def write_catalog(newest, dep11, build):
             description.remove(paragraph)
             localized[language].append(paragraph)
     ET.SubElement(component, "pkgname").text = "semfind-gui"
-    ET.SubElement(component, "icon", type="stock").text = "system-search"
+    for size in (64, 128):
+        dimensions = f"{size}x{size}"
+        icon = extracted / f"usr/share/icons/hicolor/{dimensions}/apps/{APP_ID}.png"
+        if icon.is_file():
+            contents = io.BytesIO()
+            with tarfile.open(fileobj=contents, mode="w") as archive:
+                archive.add(icon, arcname=icon.name)
+            write_index(dep11 / f"icons-{dimensions}.tar", contents.getvalue())
+            ET.SubElement(component, "icon", type="cached", width=str(size), height=str(size)).text = icon.name
+    if component.find("icon[@type='cached']") is None:
+        ET.SubElement(component, "icon", type="stock").text = "system-search"
     catalog = ET.Element("components", origin="semfind", version="0.16")
     catalog.append(component)
     xml = build / "catalog.xml"
@@ -105,8 +117,9 @@ def publish_snapshot(build, packages, signing_key):
         *(f"-oAPT::FTPArchive::Release::{name}={value}" for name, value in fields.items()),
         "release", ".",
     ], cwd=dist)
-    if desktop and b"main/dep11/Components-amd64.yml.gz" not in release:
-        raise ValueError("The Release file is missing AppStream catalog checksums.")
+    for archive in dep11.iterdir():
+        if f"main/dep11/{archive.name}".encode() not in release:
+            raise ValueError(f"The Release file is missing checksums for {archive.name}.")
     (dist / "Release").write_bytes(release)
     run("gpg", "--batch", "--local-user", signing_key, "--digest-algo", "SHA256",
         "--output", dist / "InRelease", "--clearsign", dist / "Release")

@@ -97,6 +97,10 @@ def stage_gui(build, version):
     (library / "app.py").chmod(0o755)
     shutil.copyfile(ROOT / "LICENSE", doc / "copyright")
     shutil.copyfile(PACKAGING / f"{APP_ID}.desktop", apps / f"{APP_ID}.desktop")
+    for size in (64, 128):
+        theme = stage / f"usr/share/icons/hicolor/{size}x{size}/apps"
+        theme.mkdir(parents=True)
+        shutil.copyfile(PACKAGING / f"icons/semfind-{size}.png", theme / f"{APP_ID}.png")
     metadata = ET.parse(PACKAGING / f"{APP_ID}.metainfo.xml")
     date = datetime.now(UTC).date().isoformat()
     ET.SubElement(ET.SubElement(metadata.getroot(), "releases"), "release", version=version, date=date)
@@ -124,7 +128,7 @@ def main():
         parser.error("Build this package on amd64 with Python 3.12 and pip.")
     os.umask(0o022)
     upstream = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"]["version"]
-    version = f"{upstream}-2"
+    version = f"{upstream}-3"
     args.output.mkdir(parents=True, exist_ok=True)
     output = args.output.resolve()
     with tempfile.TemporaryDirectory(prefix="semfind-deb-", dir=args.output) as directory:

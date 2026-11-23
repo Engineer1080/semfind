@@ -50,7 +50,7 @@ The builder downloads the Python wheels listed in `requirements.txt` and their d
 Install the resulting CLI package using APT. Substitute your built version in the filename if it differs from the example.
 
 ```bash
-sudo apt install ./target/deb/semfind_0.3.3-2_amd64.deb
+sudo apt install ./target/deb/semfind_0.3.3-3_amd64.deb
 semfind-download-model
 semfind init
 semfind "How do I show free disk space?" --category command
@@ -59,7 +59,7 @@ semfind "How do I show free disk space?" --category command
 To install the desktop app from a local build, give APT both local packages so it can resolve the CLI dependency.
 
 ```bash
-sudo apt install ./target/deb/semfind_0.3.3-2_amd64.deb ./target/deb/semfind-gui_0.3.3-2_all.deb
+sudo apt install ./target/deb/semfind_0.3.3-3_amd64.deb ./target/deb/semfind-gui_0.3.3-3_all.deb
 ```
 
 Open Semfind from the application menu, or run `semfind-gui`. Use **Manage index** to download the model and choose a folder to index. Run the Semfind commands as your regular user. The model and index use the existing Semfind data directory under `$XDG_DATA_HOME` (usually `~/.local/share/semfind`). Installing, upgrading, or removing the packages leaves that directory intact.
@@ -68,14 +68,14 @@ If you already installed Semfind from source, run `type -a semfind` to see which
 
 ## Prepare a signed repository
 
-The generator builds a complete snapshot with package checksums, an AppStream catalog, a signed `InRelease`, and the public archive key. Install `apt-utils`, `appstream`, and `gpg` on the publishing machine. Use the fingerprint of a project-controlled signing key available in your GnuPG keyring.
+The generator builds a complete snapshot with package checksums, an AppStream catalog and icon archives, a signed `InRelease`, and the public archive key. Install `apt-utils`, `appstream`, and `gpg` on the publishing machine. Use the fingerprint of a project-controlled signing key available in your GnuPG keyring.
 
 ```bash
 python3.12 packaging/deb/repository.py \
   --output target/apt-noble \
   --signing-key YOUR_SIGNING_KEY_FINGERPRINT \
-  target/deb/semfind_0.3.3-2_amd64.deb \
-  target/deb/semfind-gui_0.3.3-2_all.deb
+  target/deb/semfind_0.3.3-3_amd64.deb \
+  target/deb/semfind-gui_0.3.3-3_all.deb
 ```
 
 Publish the generated directory as a unit at a stable HTTPS URL. Keep the private signing key outside the published directory. For a later release, build a new snapshot and supply the new package together with any older packages you still want to serve. Keep published packages immutable by releasing any change under a new version.
