@@ -1,0 +1,203 @@
+.semfind {
+  background-color: #101722;
+  color: #e9eff8;
+  font-family: "Inter", "Cantarell", sans-serif;
+  font-size: 14px;
+}
+.semfind .top-bar {
+  background: #141d2a;
+  color: #e9eff8;
+  border-bottom: 1px solid #283445;
+  box-shadow: none;
+  padding: 6px 12px;
+}
+.semfind .brand-icon {
+  min-width: 34px;
+  min-height: 34px;
+  color: #9ef5d5;
+  background: #20473e;
+  border-radius: 10px;
+}
+.semfind .brand-word {
+  font-size: 20px;
+  font-weight: 750;
+  letter-spacing: -0.4px;
+}
+.semfind .sidebar {
+  background: #141d2a;
+  border-right: 1px solid #283445;
+  min-width: 174px;
+  padding: 22px 14px 16px;
+}
+.semfind .section-label {
+  color: #a3b0c2;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 1.65px;
+  padding: 3px 9px 7px;
+}
+.semfind .nav {
+  min-height: 33px;
+  padding: 4px 9px;
+  color: #b9c6d7;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  box-shadow: none;
+  font-weight: 600;
+}
+.semfind .nav:hover {
+  background: #243040;
+  color: #eef4fa;
+}
+.semfind .nav:checked {
+  background: #203a3b;
+  color: #a3f5d8;
+  border: 1px solid #2b514d;
+}
+.semfind .index-card {
+  background: #1a2636;
+  border: 1px solid #2b394c;
+  border-radius: 12px;
+  padding: 11px;
+}
+.semfind .index-card .section-label {
+  padding: 0;
+}
+.semfind .index-summary {
+  color: #d7e1ee;
+  font-weight: 650;
+}
+.semfind .workspace {
+  padding: 24px;
+}
+.semfind .search-panel {
+  padding: 22px 24px 18px;
+  background: linear-gradient(128deg, #233a43, #1c2c3d 56%, #192334);
+  border: 1px solid #344e57;
+  border-radius: 16px;
+}
+.semfind .hero-title {
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -1.2px;
+  color: #effcf8;
+}
+.semfind .hero-subtitle {
+  color: #c0d0dd;
+  font-size: 14px;
+}
+.semfind .query {
+  min-height: 39px;
+  background: #111a27;
+  color: #f1f6fb;
+  border: 1px solid #405566;
+  border-radius: 9px;
+  padding: 2px 12px;
+  box-shadow: none;
+}
+.semfind .query:focus-within {
+  border-color: #82e5c5;
+  box-shadow: 0 0 0 2px alpha(#82e5c5, 0.2);
+}
+.semfind .shortcut {
+  font-size: 11px;
+  color: #a8bbca;
+}
+.semfind .primary,
+.semfind .quiet,
+.semfind .example {
+  border-radius: 8px;
+  box-shadow: none;
+  font-weight: 650;
+}
+.semfind .primary {
+  color: #0f2c26;
+  background: #98edd0;
+  border: 1px solid #9af1d4;
+  padding: 5px 12px;
+}
+.semfind .primary:hover { background: #bcf9e3; }
+.semfind .primary:disabled { opacity: 0.55; }
+.semfind .quiet,
+.semfind .example {
+  color: #e2ebf6;
+  background: #233245;
+  border: 1px solid #384b61;
+  padding: 3px 9px;
+}
+.semfind .quiet:hover,
+.semfind .example:hover { background: #30445c; }
+.semfind .example { padding: 6px 10px; }
+.semfind .surface,
+.semfind .result {
+  background: #182333;
+  border: 1px solid #2c3b50;
+  border-radius: 12px;
+}
+.semfind .surface { padding: 17px; }
+.semfind .result { padding: 13px; }
+.semfind .card-title {
+  font-size: 18px;
+  font-weight: 720;
+}
+.semfind .results-heading {
+  color: #dce6f3;
+  font-size: 15px;
+  font-weight: 720;
+  padding: 0 2px 2px;
+}
+.semfind .result-icon {
+  min-width: 38px;
+  min-height: 38px;
+  border-radius: 9px;
+  color: #a9c8f1;
+  background: #283d58;
+}
+.semfind .result-icon.command { color: #aceed3; background: #25463f; }
+.semfind .result-icon.application { color: #dac0ff; background: #3d3456; }
+.semfind .result-icon.setting { color: #ffe4ab; background: #4a3b29; }
+.semfind .result-kind {
+  color: #a9bdcf;
+  font-size: 11px;
+  font-weight: 700;
+}
+.semfind .result-title {
+  color: #f0f6fc;
+  font-size: 16px;
+  font-weight: 750;
+}
+.semfind .muted,
+.semfind .source,
+.semfind .snippet {
+  color: #bccbdc;
+}
+.semfind .source {
+  color: #aac1d8;
+  font-size: 11px;
+}
+.semfind .command-example {
+  color: #c0f1dd;
+  background: #111d29;
+  border-radius: 5px;
+  font-family: monospace;
+  padding: 5px 8px;
+}
+.semfind .feedback {
+  color: #a9e9d4;
+  background: #1b3438;
+  border: 1px solid #2e5554;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.semfind .feedback.error {
+  color: #ffd3cd;
+  background: #3c2733;
+  border-color: #704452;
+}
+.semfind .root-row {
+  padding: 8px;
+  border-radius: 8px;
+  background: #1b293a;
+}
+.semfind progressbar progress { background-color: #98edd0; }

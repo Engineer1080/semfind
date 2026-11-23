@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.3
+
+- Add an optional GTK 4 desktop app that searches the same local index as the CLI. Filter results by category, read file excerpts, open files and apps, and copy command examples.
+- Manage indexed folders from the desktop app. Download the embedding model, index a selected folder or the home directory, and see elapsed time while indexing.
+- Build separate `semfind` and `semfind-gui` Debian packages for Ubuntu and Pop!_OS 24.04 on amd64. The CLI package includes the Python libraries for CPU inference. The desktop package provides the menu entry and AppStream metadata.
+- Add a generator and installation guide for signed APT repositories. The catalog links the Store entry to the optional desktop package.
+
 ## 0.3.2
 
 - Add a Linux Quickstart with a verified cross-language search, a separate sample index, and steps to index your own files and applications.

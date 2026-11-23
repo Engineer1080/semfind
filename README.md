@@ -13,6 +13,8 @@ $ semfind "Wie lange sollen personenbezogene Daten gespeichert werden?" --catego
 
 ## Quickstart
 
+For Ubuntu 24.04 and Pop!_OS 24.04 on amd64, see the [Debian package and APT guide](docs/apt.md) to build and try the CLI and optional desktop app.
+
 <a name="install-on-pop_os-2404"></a>
 
 ### Install from source on Linux
@@ -67,7 +69,7 @@ Use `semfind index ~/Documents` to scan only a chosen folder. The [search guide]
 
 ## Desktop integrations
 
-The CLI works independently of your desktop. These optional integrations search the same local index.
+The optional [Semfind desktop app](integrations/gui/README.md) provides a search window with category filters, file excerpts, and index management. The app and launcher integrations all use the same local index as the CLI.
 
 | Desktop or launcher | Search interface | Setup |
 | --- | --- | --- |

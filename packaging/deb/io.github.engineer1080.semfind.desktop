@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Semfind
+Comment=Search local files, applications, and Linux commands by meaning
+Exec=/usr/bin/semfind-gui
+TryExec=/usr/bin/semfind-gui
+Icon=system-search
+Terminal=false
+Categories=Utility;
+Keywords=Search;Files;Linux;Commands;

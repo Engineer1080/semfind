@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.engineer1080.semfind</id>
+  <name>Semfind</name>
+  <summary>Search local files, applications, and Linux commands by meaning</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+  <developer id="io.github.engineer1080">
+    <name>Semfind contributors</name>
+  </developer>
+  <description>
+    <p>Describe what you want to find in everyday language. Semfind searches
+    file contents, installed applications, and Linux command examples using
+    a multilingual model on your own computer.</p>
+    <p>Filter results, open matching files and applications, and copy Linux
+    command examples. Choose what to index and search offline after setup.</p>
+  </description>
+  <launchable type="desktop-id">io.github.engineer1080.semfind.desktop</launchable>
+  <provides>
+    <binary>semfind-gui</binary>
+  </provides>
+  <categories>
+    <category>Utility</category>
+  </categories>
+  <url type="homepage">https://github.com/Engineer1080/semfind</url>
+  <url type="bugtracker">https://github.com/Engineer1080/semfind/issues</url>
+  <content_rating type="oars-1.1"/>
+</component>

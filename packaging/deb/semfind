@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+prefix=$(dirname "$(dirname "$(readlink -f "$0")")")
+export SEMFIND_PYTHON="${SEMFIND_PYTHON:-$prefix/lib/semfind/python/bin/python3.12}"
+exec "$prefix/lib/semfind/semfind" "$@"
