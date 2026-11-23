@@ -10,18 +10,31 @@ ProjectLicense: Apache-2.0
 Name:
   C: Semfind
 Summary:
-  C: Search local files, applications, and Linux commands by meaning
+  C: Offline semantic search for files, apps, and Linux commands
+  de: Lokale semantische Suche für Dateien, Apps und Linux-Befehle
 Description:
   C: >-
-    <p>Describe what you want to find in everyday language. Semfind searches
-        file contents, installed applications, and Linux command examples using
-        a multilingual model on your own computer.</p>
-    <p>Filter results, open matching files and applications, and copy Linux
-        command examples. Choose what to index and search offline after setup.</p>
+    <p>Describe what you're looking for in everyday language. Semfind finds files by their
+        contents, installed apps by what they do, and Linux commands by the task you want to
+        accomplish. The multilingual model can find an English document from a German question.</p>
+    <p>Filter results by category, read matching passages with line or page references, and
+        open files and applications directly. Copy Linux command examples to the clipboard.</p>
+    <p>Choose individual folders or index your home directory. After you download the model,
+        searches run offline. The desktop app shares its index with the Semfind CLI.</p>
+  de: >-
+    <p>Beschreibe in Alltagssprache, was du suchst. Semfind findet Dateien
+        nach Inhalt, installierte Programme nach ihrer Funktion und Linux-Befehle nach der
+        gewünschten Aufgabe. Eine deutsche Frage kann auch ein englisches Dokument finden.</p>
+    <p>Filtere Treffer nach Kategorie und lies passende Textausschnitte mit
+        Zeilen- oder Seitenangaben. Öffne Dateien und Programme direkt oder kopiere Beispiele
+        für Linux-Befehle in die Zwischenablage.</p>
+    <p>Wähle einzelne Ordner oder indexiere dein Home-Verzeichnis. Nach dem
+        Modelldownload funktioniert die Suche offline. Die Desktop-App nutzt denselben Index
+        wie der Terminalbefehl semfind.</p>
 Developer:
   id: io.github.engineer1080
   name:
-    C: Semfind contributors
+    C: Mario Michael Heinrich
 Categories:
 - Utility
 Url:
@@ -36,7 +49,7 @@ Provides:
   binaries:
   - semfind-gui
 Releases:
-- version: 0.3.3-1
+- version: 0.3.3-2
   type: stable
   unix-timestamp: 1795392000
 ContentRating:

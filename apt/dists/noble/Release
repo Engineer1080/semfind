@@ -1,28 +1,28 @@
 Architectures: amd64
 Codename: noble
 Components: main
-Date: Mon, 23 Nov 2026 02:17:28 +0000
+Date: Mon, 23 Nov 2026 02:40:57 +0000
 Description: Semfind packages for Ubuntu and Pop!_OS 24.04
 Label: Semfind
 Origin: Semfind
 Suite: noble
 MD5Sum:
- 8f7c693167d8b878bf77bb6de07f78fd             1747 main/binary-amd64/Packages
- c48a7a1e2703f65399c50c095c0ff30c              923 main/binary-amd64/Packages.gz
- af6fe7d702eba466e29db840898c49b7             1103 main/dep11/Components-amd64.yml
- b38cf8f1e115029302a91c831e873c04              591 main/dep11/Components-amd64.yml.gz
+ d6779207c5d26c93568e18dc0da563d4             3494 main/binary-amd64/Packages
+ 270d4d5618c0ebb5a7f4c87eb9068080             1300 main/binary-amd64/Packages.gz
+ fc9c12539f5992e6a5b7828a89a0623c             2162 main/dep11/Components-amd64.yml
+ d9cec8f4a26c06b00d65becfde54388b             1137 main/dep11/Components-amd64.yml.gz
 SHA1:
- e770c543ffc4899d58e11962b7312ed0148e1cdb             1747 main/binary-amd64/Packages
- e59f69c7eccd9e7105bb3e09d121155dc84dac8a              923 main/binary-amd64/Packages.gz
- c7219ad3ff1022bfab670b42eaaa87614d1ec68c             1103 main/dep11/Components-amd64.yml
- b5c8174d82f70bd8c65d74e12e9ad164b194c9b1              591 main/dep11/Components-amd64.yml.gz
+ 40f771dca835dfb774d52c4a907b4edde1ff6698             3494 main/binary-amd64/Packages
+ db9fb10093ea64dc8a4595e81ecfe0ff2807d16c             1300 main/binary-amd64/Packages.gz
+ 6f989d9d0d0764c293c3461a2bea65caea51a583             2162 main/dep11/Components-amd64.yml
+ 698a96f71e136e1fd0efbd5afddeaea3efa5c83d             1137 main/dep11/Components-amd64.yml.gz
 SHA256:
- 7c03cbe4843440801b5fdf54a44f1707a0186b83219c7046ba92dff11b140086             1747 main/binary-amd64/Packages
- 62f5c5a2d22e10e4be51e795a9a2c1a4d5d3c688760763a0b54b7c1739f5b9d2              923 main/binary-amd64/Packages.gz
- 254a55bd88dce50fdaa985e3bcfae35444d76881c5de014d702d3c4d4e6402b5             1103 main/dep11/Components-amd64.yml
- 0be47fa1dce6c47d541d5fd3213bc6b9c95154f9d4a7c63e83eb28f127697f67              591 main/dep11/Components-amd64.yml.gz
+ 606f62cf8387bff54b930335fe8e6f7ee49b98b4b3d04257c67cfcdbada1b96a             3494 main/binary-amd64/Packages
+ 818b63e9bcd817525261e629af9ba3123e99258d9d3980976c21686a391aa82a             1300 main/binary-amd64/Packages.gz
+ 26cf176175b1b8cf80f8df856c8a9e15e345473347655485df60e2b4bb85c54b             2162 main/dep11/Components-amd64.yml
+ 7a10c957a428e4fe3da6fca5861ea5e5fc1fcebb1275275f935821555f4156c8             1137 main/dep11/Components-amd64.yml.gz
 SHA512:
- fa97e86ba1d9f178893d83f9f87a6b73e1b0649ebdcfff70998cee042fcf80c94818e78ddb88960745213a83a58bea5fdb6d2783877feab53121bc1d0e49a65e             1747 main/binary-amd64/Packages
- d47667badc5547ecb3ab698aa61a700bb3fc1976a707f84401edcde654b8fcff54b1084c95e6ec400be5fdc743e5c8e7bfa66dd02eca87f8549deec8a1df6c1f              923 main/binary-amd64/Packages.gz
- 69b96872f4f2323a00ddf1a40b1f74c35536498de286fdb09f1714c598592a933a2413d532370db430b591e17516bde1b9c685c39a9da05431b5728d0970981f             1103 main/dep11/Components-amd64.yml
- 940da48e3cfc6eac71ab139df68d1e0dd8aaaed92ecf2d7ad78e922a20abe157cde32f2f039d16b89919948175118a911505bbc5f9562ca8a914130f84d3603e              591 main/dep11/Components-amd64.yml.gz
+ 426beab4bc954012a47319d167eb3174d5dab7090e7914b91db3dee98ba23cb9da575a02111caa538d736bbe653f6bb261d4b7705b947f85e23052fb2da7aa0b             3494 main/binary-amd64/Packages
+ cbf513168eb95b023a11561f8b71f7ad0776559e9f8b5434ab04bb59f07ab17d5615057854c203c3d80afe05db65a939bdcab36a5ab9b94570aa79d0cab0135d             1300 main/binary-amd64/Packages.gz
+ 92e3795d26acdffaf760269ea05abce33397f58a13d89f43db152b6ce956a7f5bd921c6f01e80c8030aa1efd166a54a4dbe70f6e27b5f40b2279137424fa0bb1             2162 main/dep11/Components-amd64.yml
+ 97eafcae37c0937cbfc6d6ad9af3879754342e4d61d00e9af66d1233824876ada9768184e0d10fc3a59ed1ef5bd02edff1acdc0e092a3e4364f1d193177bc4c3             1137 main/dep11/Components-amd64.yml.gz
