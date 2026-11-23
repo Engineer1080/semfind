@@ -1,0 +1,28 @@
+Architectures: amd64
+Codename: noble
+Components: main
+Date: Mon, 23 Nov 2026 02:17:28 +0000
+Description: Semfind packages for Ubuntu and Pop!_OS 24.04
+Label: Semfind
+Origin: Semfind
+Suite: noble
+MD5Sum:
+ 8f7c693167d8b878bf77bb6de07f78fd             1747 main/binary-amd64/Packages
+ c48a7a1e2703f65399c50c095c0ff30c              923 main/binary-amd64/Packages.gz
+ af6fe7d702eba466e29db840898c49b7             1103 main/dep11/Components-amd64.yml
+ b38cf8f1e115029302a91c831e873c04              591 main/dep11/Components-amd64.yml.gz
+SHA1:
+ e770c543ffc4899d58e11962b7312ed0148e1cdb             1747 main/binary-amd64/Packages
+ e59f69c7eccd9e7105bb3e09d121155dc84dac8a              923 main/binary-amd64/Packages.gz
+ c7219ad3ff1022bfab670b42eaaa87614d1ec68c             1103 main/dep11/Components-amd64.yml
+ b5c8174d82f70bd8c65d74e12e9ad164b194c9b1              591 main/dep11/Components-amd64.yml.gz
+SHA256:
+ 7c03cbe4843440801b5fdf54a44f1707a0186b83219c7046ba92dff11b140086             1747 main/binary-amd64/Packages
+ 62f5c5a2d22e10e4be51e795a9a2c1a4d5d3c688760763a0b54b7c1739f5b9d2              923 main/binary-amd64/Packages.gz
+ 254a55bd88dce50fdaa985e3bcfae35444d76881c5de014d702d3c4d4e6402b5             1103 main/dep11/Components-amd64.yml
+ 0be47fa1dce6c47d541d5fd3213bc6b9c95154f9d4a7c63e83eb28f127697f67              591 main/dep11/Components-amd64.yml.gz
+SHA512:
+ fa97e86ba1d9f178893d83f9f87a6b73e1b0649ebdcfff70998cee042fcf80c94818e78ddb88960745213a83a58bea5fdb6d2783877feab53121bc1d0e49a65e             1747 main/binary-amd64/Packages
+ d47667badc5547ecb3ab698aa61a700bb3fc1976a707f84401edcde654b8fcff54b1084c95e6ec400be5fdc743e5c8e7bfa66dd02eca87f8549deec8a1df6c1f              923 main/binary-amd64/Packages.gz
+ 69b96872f4f2323a00ddf1a40b1f74c35536498de286fdb09f1714c598592a933a2413d532370db430b591e17516bde1b9c685c39a9da05431b5728d0970981f             1103 main/dep11/Components-amd64.yml
+ 940da48e3cfc6eac71ab139df68d1e0dd8aaaed92ecf2d7ad78e922a20abe157cde32f2f039d16b89919948175118a911505bbc5f9562ca8a914130f84d3603e              591 main/dep11/Components-amd64.yml.gz

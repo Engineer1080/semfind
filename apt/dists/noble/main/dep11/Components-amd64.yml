@@ -1,0 +1,43 @@
+---
+File: DEP-11
+Version: 1.0
+Origin: semfind
+---
+Type: desktop-application
+ID: io.github.engineer1080.semfind
+Package: semfind-gui
+ProjectLicense: Apache-2.0
+Name:
+  C: Semfind
+Summary:
+  C: Search local files, applications, and Linux commands by meaning
+Description:
+  C: >-
+    <p>Describe what you want to find in everyday language. Semfind searches
+        file contents, installed applications, and Linux command examples using
+        a multilingual model on your own computer.</p>
+    <p>Filter results, open matching files and applications, and copy Linux
+        command examples. Choose what to index and search offline after setup.</p>
+Developer:
+  id: io.github.engineer1080
+  name:
+    C: Semfind contributors
+Categories:
+- Utility
+Url:
+  homepage: https://github.com/Engineer1080/semfind
+  bugtracker: https://github.com/Engineer1080/semfind/issues
+Icon:
+  stock: system-search
+Launchable:
+  desktop-id:
+  - io.github.engineer1080.semfind.desktop
+Provides:
+  binaries:
+  - semfind-gui
+Releases:
+- version: 0.3.3-1
+  type: stable
+  unix-timestamp: 1795392000
+ContentRating:
+  oars-1.1: {}
