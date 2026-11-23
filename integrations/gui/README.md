@@ -18,6 +18,8 @@ Use `--semfind /path/to/semfind` to select a particular executable or wrapper. T
 
 Open **Manage index** to download an embedding model and index a selected folder or your home directory. A home scan also indexes installed applications and local command manuals. A progress indicator and elapsed time remain visible while the CLI is working. Refresh or remove a folder from the list to update its index entries. Press **Ctrl+K** to focus the search box.
 
+The **Local index** card shows the embedding model and the status of optional Florence-2 image captioning. After a search or scan loads the embedding model, the card shows the last execution device: CPU, NVIDIA CUDA, or AMD MIGraphX. A cached search can reuse an embedding without starting the model. The image caption device appears after captions are generated, using CPU, CUDA, or ROCm.
+
 **Download model** defaults to Granite 97M for a new index. For an existing index, it retrieves the exact built-in model used to create it. For a custom model, keep its original directory available through `SEMFIND_MODEL_DIR`. Use the CLI to [switch models and rebuild the index](../../docs/models.md#choose-an-embedding-model).
 
 To open the desktop app with a separate index and model, close the running app and launch it from a terminal with `SEMFIND_INDEX_DIR` and `SEMFIND_MODEL` set. The selected index then applies to searches and all actions in **Manage index**.

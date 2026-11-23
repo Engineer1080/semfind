@@ -221,6 +221,87 @@ fn search_time_is_opt_in_and_preserves_json() -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn runtime_info_reports_the_effective_embedding_provider() -> Result<()> {
+    use semfind_core::{Embedder, Index, InputKind};
+    use std::os::unix::fs::PermissionsExt;
+
+    struct Fixture;
+
+    impl Embedder for Fixture {
+        fn identity(&self) -> &str {
+            "custom-onnx-v1:fixture"
+        }
+
+        fn encode(&mut self, _: InputKind, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+            Ok(vec![vec![1.0]; texts.len()])
+        }
+    }
+
+    let temp = tempfile::Builder::new()
+        .prefix("semfind-runtime-")
+        .tempdir()?;
+    let index = temp.path().join("index");
+    let root = temp.path().join("notes");
+    fs::create_dir(&root)?;
+    fs::write(root.join("disk.txt"), "Check available storage.")?;
+    Index::open(&index)?.synchronize(Some(&root), &Default::default(), &mut Fixture)?;
+
+    let python = temp.path().join("python-fixture");
+    fs::write(
+        &python,
+        r#"#!/bin/sh
+printf '{"identity":"custom-onnx-v1:fixture","provider":"%s"}\n' "$FIXTURE_PROVIDER"
+while IFS= read -r request; do
+    printf '{"vectors":[[1]],"uses_cpu":%s}\n' "$FIXTURE_USES_CPU"
+done
+"#,
+    )?;
+    fs::set_permissions(&python, fs::Permissions::from_mode(0o700))?;
+
+    for (initial, uses_cpu, expected) in [
+        ("CUDAExecutionProvider", "false", "CUDAExecutionProvider"),
+        ("CUDAExecutionProvider", "true", "CPUExecutionProvider"),
+        (
+            "MIGraphXExecutionProvider",
+            "false",
+            "MIGraphXExecutionProvider",
+        ),
+    ] {
+        let result = cli(&index)
+            .env_remove("SEMFIND_MODEL")
+            .env("FIXTURE_PROVIDER", initial)
+            .env("FIXTURE_USES_CPU", uses_cpu)
+            .arg("--model-dir")
+            .arg(temp.path())
+            .arg("--python")
+            .arg(&python)
+            .args([
+                "search",
+                "--json",
+                "--runtime-info",
+                "--category",
+                "file",
+                "available storage",
+            ])
+            .output()?;
+        let stderr = String::from_utf8(result.stderr.clone())?;
+        let hits: Vec<Hit> = serde_json::from_slice(&success(result)?)?;
+        assert_eq!(hits[0].title, "disk.txt");
+        let record = stderr
+            .lines()
+            .find_map(|line| line.strip_prefix("semfind: runtime "))
+            .with_context(|| format!("missing runtime report in {stderr}"))?;
+        let record: serde_json::Value = serde_json::from_str(record)?;
+        assert_eq!(record["model"], "custom-onnx-v1:fixture");
+        assert_eq!(record["embedding_provider"], expected);
+        assert!(record["caption_backend"].is_null());
+        assert_eq!(record["cache_hit"], false);
+    }
+    Ok(())
+}
+
 #[test]
 fn stdin_search_flushes_each_result_before_eof() -> Result<()> {
     let temp = tempfile::tempdir()?;

@@ -2,7 +2,7 @@ use anyhow::{Context, Result, ensure};
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum, parser::ValueSource};
 use semfind_core::{
     Category, Distro, Embedder, ExecutionDevice, FileKind, FlorenceCaptioner, HitLocation, Index,
-    IndexOptions, IndexReport, InputKind, Language, LocalModel, SearchOptions,
+    IndexOptions, IndexReport, InputKind, Language, LocalModel, SearchOptions, Status,
 };
 mod config;
 mod distro;
@@ -95,6 +95,15 @@ enum ModelChoice {
 }
 
 impl ModelChoice {
+    fn name(self) -> &'static str {
+        match self {
+            Self::E5Small => "E5 Small",
+            Self::E5Large => "E5 Large",
+            Self::Granite97M => "Granite 97M Multilingual R2",
+            Self::Granite311M => "Granite 311M Multilingual R2",
+        }
+    }
+
     fn directory(self) -> &'static str {
         match self {
             Self::E5Small => "",
@@ -104,7 +113,7 @@ impl ModelChoice {
         }
     }
 
-    fn for_index(identity: &str) -> Self {
+    fn from_identity(identity: &str) -> Option<Self> {
         let mut parts = identity.split(':');
         let recipe = parts.next();
         let tokenizer = parts.nth(1);
@@ -112,13 +121,43 @@ impl ModelChoice {
             (
                 Some("e5-mean-pool-v1"),
                 Some("62c24cdc13d4c9952d63718d6c9fa4c287974249e16b7ade6b5d85e7bbb75626"),
-            ) => Self::E5Large,
-            (Some("e5-mean-pool-v1"), _) => Self::E5Small,
+            ) => Some(Self::E5Large),
+            (
+                Some("e5-mean-pool-v1"),
+                Some("0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39"),
+            ) => Some(Self::E5Small),
             (
                 Some("granite-r2-cls-512-v1"),
                 Some("0087c868b33bad550a78a08d19798cfd7f713cde4f020803b8f51f405503e15f"),
-            ) => Self::Granite311M,
-            _ => Self::Granite97M,
+            ) => Some(Self::Granite311M),
+            (
+                Some("granite-r2-cls-512-v1"),
+                Some("4f2842d568e2724370aec203652a42ac783c7937f8347a1a2cc7506d71f1582f"),
+            ) => Some(Self::Granite97M),
+            _ => None,
+        }
+    }
+
+    fn for_index(identity: &str) -> Self {
+        Self::from_identity(identity).unwrap_or_else(|| {
+            if identity.starts_with("e5-mean-pool-v1:") {
+                Self::E5Small
+            } else {
+                Self::Granite97M
+            }
+        })
+    }
+
+    fn index_model_name(identity: &str) -> &'static str {
+        match Self::from_identity(identity) {
+            Some(Self::E5Small)
+                if identity.split(':').nth(1)
+                    == Some("dd476dd0c2514e9b9be83aeb3853fac0763e0bdf4a71645407587d77c48a2d88") =>
+            {
+                "E5 Small (INT8)"
+            }
+            Some(model) => model.name(),
+            None => "Custom ONNX model",
         }
     }
 }
@@ -133,6 +172,9 @@ enum Command {
         /// Report indexing time and phase durations on stderr.
         #[arg(long)]
         time: bool,
+        /// Report model execution providers as JSON on stderr.
+        #[arg(long)]
+        runtime_info: bool,
         /// Exclude a directory or file by name or by a path relative to HOME.
         #[arg(long)]
         exclude: Vec<PathBuf>,
@@ -146,6 +188,9 @@ enum Command {
     /// Synchronize a directory and the built-in catalogs. Omit the root for catalogs only.
     Index {
         root: Option<PathBuf>,
+        /// Report model execution providers as JSON on stderr.
+        #[arg(long)]
+        runtime_info: bool,
         /// Include local manual pages and executable names from PATH.
         #[arg(long)]
         manpages: bool,
@@ -235,6 +280,9 @@ struct Search {
     /// Report elapsed search time on stderr.
     #[arg(long)]
     time: bool,
+    /// Report model execution providers as JSON on stderr.
+    #[arg(long)]
+    runtime_info: bool,
     /// Skip reading or saving the last search's embedding.
     #[arg(long)]
     no_cache: bool,
@@ -608,7 +656,29 @@ fn run(
         Some(Command::Status { json }) => {
             let status = index.status()?;
             if json {
-                return print_json(output, &status);
+                let model_name = match &status.model {
+                    Some(identity) => ModelChoice::index_model_name(identity),
+                    None if cli.model_dir.is_some() => "Custom ONNX model",
+                    None => selected_model.name(),
+                };
+                let caption_model_name = caption_directory()
+                    .ok()
+                    .filter(|path| FlorenceCaptioner::files_present(path))
+                    .map(|_| {
+                        if cli.caption_model_dir.is_some() {
+                            "Florence-2 (local checkpoint)"
+                        } else {
+                            "Florence-2 Base FT"
+                        }
+                    });
+                return print_json(
+                    output,
+                    &StatusWithModels {
+                        index: status,
+                        model_name,
+                        caption_model_name,
+                    },
+                );
             }
             let [
                 files,
@@ -639,6 +709,7 @@ fn run(
         Some(Command::Init {
             force,
             time,
+            runtime_info,
             exclude,
             clear_excludes,
             no_caption_images,
@@ -706,12 +777,16 @@ fn run(
             drop(progress);
             gpu_hint.show(model.uses_cpu(), false);
             let report = report?;
+            let caption_backend = captioner.as_ref().and_then(FlorenceCaptioner::backend);
+            if runtime_info {
+                report_index_runtime(&model, caption_backend);
+            }
             if let Some(timing) = timing {
                 eprintln!(
                     "semfind: ONNX Runtime (startup): {}",
                     model.initial_provider()
                 );
-                if let Some(backend) = captioner.as_ref().and_then(FlorenceCaptioner::backend) {
+                if let Some(backend) = caption_backend {
                     eprintln!("semfind: Florence-2: {backend}");
                 }
                 timing.print(messages);
@@ -720,6 +795,7 @@ fn run(
         }
         Some(Command::Index {
             root,
+            runtime_info,
             manpages,
             caption_images,
             exclude,
@@ -730,20 +806,25 @@ fn run(
             };
             let mut model = start_model()?;
             gpu_hint.show(model.uses_cpu(), false);
-            let report = if caption_images {
-                let directory = caption_directory()?;
-                let mut captioner = FlorenceCaptioner::with_runtime(
-                    &cli.python,
-                    &directory,
-                    runtime_dir.as_deref(),
-                    allow_caption_gpu,
-                )?;
+            let directory = caption_images.then(caption_directory).transpose()?;
+            let mut captioner = directory
+                .as_deref()
+                .map(|path| {
+                    FlorenceCaptioner::with_runtime(
+                        &cli.python,
+                        path,
+                        runtime_dir.as_deref(),
+                        allow_caption_gpu,
+                    )
+                })
+                .transpose()?;
+            let report = if let Some(captioner) = &mut captioner {
                 index.synchronize_with_image_captions(
                     root.as_deref().expect("--caption-images requires a root"),
                     &options,
                     manpages.then(Distro::current),
                     &mut model,
-                    &mut captioner,
+                    captioner,
                 )?
             } else if manpages {
                 index.synchronize_with_manpages(
@@ -756,11 +837,18 @@ fn run(
                 index.synchronize(root.as_deref(), &options, &mut model)?
             };
             gpu_hint.show(model.uses_cpu(), false);
+            if runtime_info {
+                report_index_runtime(
+                    &model,
+                    captioner.as_ref().and_then(FlorenceCaptioner::backend),
+                );
+            }
             print_index_report(output, &report, messages)?;
         }
         Some(Command::Search(mut search)) => {
             search.time |= cli.search.time;
             search.no_cache |= cli.search.no_cache;
+            search.runtime_info |= cli.search.runtime_info;
             run_search(
                 &index,
                 search,
@@ -787,6 +875,38 @@ fn run(
         Some(Command::ServeModel { .. }) => unreachable!(),
     }
     Ok(())
+}
+
+#[derive(serde::Serialize)]
+struct StatusWithModels {
+    #[serde(flatten)]
+    index: Status,
+    model_name: &'static str,
+    caption_model_name: Option<&'static str>,
+}
+
+fn report_index_runtime(model: &LocalModel, caption_backend: Option<&str>) {
+    let provider = active_provider(model.initial_provider(), model.uses_cpu());
+    report_runtime(Some((model.identity(), provider)), caption_backend, false);
+}
+
+fn active_provider(provider: &str, uses_cpu: bool) -> &str {
+    if uses_cpu {
+        "CPUExecutionProvider"
+    } else {
+        provider
+    }
+}
+
+fn report_runtime(embedding: Option<(&str, &str)>, caption_backend: Option<&str>, cache_hit: bool) {
+    let (model, provider) = embedding.unzip();
+    let record = serde_json::json!({
+        "model": model,
+        "embedding_provider": provider,
+        "caption_backend": caption_backend,
+        "cache_hit": cache_hit,
+    });
+    eprintln!("semfind: runtime {record}");
 }
 
 struct GpuHint<'a> {
@@ -985,6 +1105,13 @@ fn run_search(
             result => result,
         };
         let (hits, cache_hit) = result?;
+        if search.runtime_info {
+            let embedding = model.as_ref().map(|model| {
+                let provider = active_provider(model.provider().1, model.uses_cpu());
+                (model.identity(), provider)
+            });
+            report_runtime(embedding, None, cache_hit);
+        }
         if let Some(started) = started {
             let milliseconds = started.elapsed().as_secs_f64() * 1000.0;
             eprintln!("semfind: {} {milliseconds:.2} ms", messages.search_time);

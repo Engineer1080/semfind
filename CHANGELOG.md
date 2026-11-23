@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.5
+
+- Show the active index's embedding model and the last execution device in the desktop app. The device reflects CPU fallback and stays visible when a search reuses a cached embedding.
+- Show the Florence-2 checkpoint and its most recent CPU, CUDA, or ROCm device separately from the text embedding device.
+- Include model names in `semfind status --json`. Pass `--runtime-info` to search or indexing commands to get execution-provider diagnostics on stderr.
+
 ## 0.3.4
 
 - Fix **Download model** in the desktop app for existing indexes. It retrieves the exact supported ONNX weights and tokenizer used by the index, including the E5 Small INT8 variant. Granite 97M remains the default for new indexes.

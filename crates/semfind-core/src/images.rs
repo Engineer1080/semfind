@@ -96,6 +96,11 @@ impl CaptionWorker {
 }
 
 impl<'a> FlorenceCaptioner<'a> {
+    /// Whether the expected checkpoint files are present without loading the model.
+    pub fn files_present(directory: &Path) -> bool {
+        FILES.iter().all(|name| directory.join(name).is_file())
+    }
+
     /// Validate local model files and auto-select a device in the given Python runtime.
     pub fn new(python: &'a Path, directory: &'a Path) -> Result<Self> {
         Self::with_runtime(python, directory, None, true)

@@ -68,6 +68,14 @@
   color: #d7e1ee;
   font-weight: 650;
 }
+.semfind .index-models,
+.semfind .caption-summary {
+  margin-top: 5px;
+}
+.semfind .runtime-detail {
+  color: #bacbde;
+  font-size: 11px;
+}
 .semfind .workspace {
   padding: 24px;
 }

@@ -27,6 +27,15 @@ HIT_LABELS = {
     "file": "File", "application": "Application", "command": "Command",
     "setting": "Setting", "action": "Action",
 }
+RUNTIME_PREFIX = "semfind: runtime "
+DEVICES = {
+    "CPUExecutionProvider": "CPU",
+    "CUDAExecutionProvider": "CUDA (GPU)",
+    "MIGraphXExecutionProvider": "MIGraphX (GPU)",
+    "CPU": "CPU",
+    "CUDA": "CUDA (GPU)",
+    "ROCm": "ROCm (GPU)",
+}
 
 
 def box(spacing=0, vertical=False, style=None):
@@ -85,7 +94,7 @@ def run_process(arguments, complete):
             complete(None, error.message)
             return
         if process.get_successful():
-            complete(output, "")
+            complete(output, errors)
         else:
             complete(None, errors.strip() or output.strip() or "Semfind exited unexpectedly.")
 
@@ -98,6 +107,9 @@ class SearchWindow(Gtk.ApplicationWindow):
         super().__init__(application=application, title="Semfind", default_width=1080, default_height=760)
         self.cli = cli
         self.status = {}
+        self.last_embedding = None
+        self.last_caption_backend = None
+        self.cached_query = False
         self.category = ""
         self.search_request = 0
         self.search_process = None
@@ -154,6 +166,21 @@ class SearchWindow(Gtk.ApplicationWindow):
         index_card.append(label("LOCAL INDEX", "section-label"))
         self.index_summary = label("Checking index…", "index-summary", wrap=True)
         index_card.append(self.index_summary)
+        models = box(4, vertical=True, style="index-models")
+        models.append(label("EMBEDDINGS", "section-label"))
+        self.embedding_name = label("Checking model…", "index-summary", wrap=True)
+        self.embedding_name.set_max_width_chars(24)
+        models.append(self.embedding_name)
+        self.embedding_device = label("Device: not checked", "runtime-detail", wrap=True)
+        models.append(self.embedding_device)
+        self.caption_summary = box(4, vertical=True, style="caption-summary")
+        self.caption_summary.append(label("IMAGE CAPTIONS", "section-label"))
+        self.caption_name = label("Checking model…", "index-summary", wrap=True)
+        self.caption_summary.append(self.caption_name)
+        self.caption_device = label("Device: not checked", "runtime-detail", wrap=True)
+        self.caption_summary.append(self.caption_device)
+        models.append(self.caption_summary)
+        index_card.append(models)
         manage = button("Manage index", self.manage_index, "quiet", "folder-symbolic")
         index_card.append(manage)
         self.sidebar.append(index_card)
@@ -230,6 +257,8 @@ class SearchWindow(Gtk.ApplicationWindow):
     def update_status(self, output, error):
         if output is None:
             self.index_summary.set_label("Index unavailable")
+            self.embedding_name.set_label("Model unavailable")
+            self.caption_summary.set_visible(False)
             self.feedback(error, error=True)
             return
         try:
@@ -242,11 +271,58 @@ class SearchWindow(Gtk.ApplicationWindow):
         file_label = "file" if files == 1 else "files"
         root_label = "folder" if roots == 1 else "folders"
         self.index_summary.set_label(f"{files:,} {file_label} · {roots} {root_label}")
+        self.embedding_name.set_label(self.status.get("model_name", "Model name unavailable"))
+        if self.last_embedding and self.last_embedding[0] != self.status.get("model"):
+            self.last_embedding = None
+            self.cached_query = False
+        caption_name = self.status.get("caption_model_name")
+        self.caption_summary.set_visible("caption_model_name" in self.status)
+        self.caption_name.set_label(caption_name or "Not set up")
+        self.caption_device.set_visible(bool(caption_name))
+        if not caption_name:
+            self.last_caption_backend = None
+        self.update_device_labels()
         if not self.active_query:
             self.show_welcome()
 
     def refresh_status(self):
         run_process([self.cli, "status", "--json"], self.update_status)
+
+    def runtime_options(self):
+        return ["--runtime-info"] if "model_name" in self.status else []
+
+    def update_runtime(self, diagnostics):
+        for line in diagnostics.splitlines():
+            if not line.startswith(RUNTIME_PREFIX):
+                continue
+            try:
+                runtime = json.loads(line[len(RUNTIME_PREFIX):])
+            except ValueError:
+                continue
+            if not isinstance(runtime, dict):
+                continue
+            if provider := runtime.get("embedding_provider"):
+                self.last_embedding = (runtime["model"], provider)
+            if backend := runtime.get("caption_backend"):
+                self.last_caption_backend = backend
+            self.cached_query = runtime.get("cache_hit", False)
+        self.update_device_labels()
+
+    def update_device_labels(self):
+        if self.last_embedding:
+            provider = self.last_embedding[1]
+            self.embedding_device.set_label(f"Last device: {DEVICES.get(provider, provider)}")
+        elif "model_name" not in self.status:
+            self.embedding_device.set_label("Device status unavailable")
+        elif self.cached_query:
+            self.embedding_device.set_label("Cached query · device not checked")
+        else:
+            self.embedding_device.set_label("Device: not checked")
+        if self.last_caption_backend:
+            backend = self.last_caption_backend
+            self.caption_device.set_label(f"Last device: {DEVICES.get(backend, backend)}")
+        else:
+            self.caption_device.set_label("Device: not checked")
 
     def show_welcome(self):
         clear(self.content)
@@ -295,25 +371,29 @@ class SearchWindow(Gtk.ApplicationWindow):
             return
 
         arguments = [self.cli, "search", "--json", "--limit", "30", "--no-gpu-hint"]
+        arguments.extend(self.runtime_options())
         if self.category:
             arguments += ["--category", self.category]
         request = self.search_request
         self.feedback("Searching your local index…")
         clear(self.content)
 
-        def completed(output, error):
+        def completed(output, stderr):
             if request != self.search_request:
                 return
             self.search_process = None
             if output is None:
                 self.feedback("Search failed. Check the model and index in Manage index.", error=True)
-                self.show_error_details(error)
+                self.show_error_details(stderr)
                 return
             try:
                 hits = json.loads(output)
             except ValueError:
                 self.feedback("Semfind returned an unreadable response.", error=True)
                 return
+            self.update_runtime(stderr)
+            if self.last_embedding and self.last_embedding[0] != self.status.get("model"):
+                self.refresh_status()
             self.feedback()
             self.render_results(hits)
 
@@ -477,14 +557,14 @@ class SearchWindow(Gtk.ApplicationWindow):
 
     def refresh_folder(self, dialog, folder):
         dialog.close()
-        self.start_job([self.cli, "index", "--", folder], "Indexing the selected folder")
+        self.start_job([self.cli, "index", *self.runtime_options(), "--", folder], "Indexing the selected folder")
 
     def index_home(self, dialog):
         dialog.close()
         self.confirm("Index your home directory?",
                      "This scans supported files under your home directory and updates installed apps and local commands.",
                      "Index home",
-                     lambda: self.start_job([self.cli, "init"], "Indexing your home directory"))
+                     lambda: self.start_job([self.cli, "init", *self.runtime_options()], "Indexing your home directory"))
 
     def remove_folder(self, dialog, folder):
         dialog.close()
@@ -511,15 +591,16 @@ class SearchWindow(Gtk.ApplicationWindow):
         progress()
         timer = GLib.timeout_add(140, progress)
 
-        def complete(output, error):
+        def complete(output, stderr):
             GLib.source_remove(timer)
             self.job = None
             self.search_button.set_sensitive(True)
             self.progress.set_visible(False)
             if output is None:
                 self.feedback(f"{title} failed.", error=True)
-                self.alert("Semfind reported an error", error[-1600:])
+                self.alert("Semfind reported an error", stderr[-1600:])
             else:
+                self.update_runtime(stderr)
                 self.feedback(output.strip().splitlines()[-1] if output.strip() else "Done.")
                 if self.active_query:
                     self.search()
