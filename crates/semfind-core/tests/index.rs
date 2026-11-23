@@ -108,6 +108,82 @@ fn new_fixture() -> Result<(tempfile::TempDir, Index, PathBuf, FixtureModel)> {
 }
 
 #[test]
+fn switching_models_keeps_saved_content_and_rolls_back_partial_rebuilds() -> Result<()> {
+    struct NewEncoder {
+        batches: usize,
+        fail: bool,
+    }
+
+    impl Embedder for NewEncoder {
+        fn identity(&self) -> &str {
+            "fixture-v2"
+        }
+
+        fn encode(&mut self, kind: InputKind, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+            if matches!(kind, InputKind::Passage) {
+                self.batches += 1;
+                if self.fail && self.batches > 1 {
+                    bail!("fixture failed after writing the first batch");
+                }
+            }
+            Ok(vec![vec![1.0, 0.0]; texts.len()])
+        }
+    }
+
+    let (temp, mut index, root, mut original) = new_fixture()?;
+    fixture(&root, "kitchen.jpg", "kitchen")?;
+    fixture(&root, "notes.md", "Available storage")?;
+    fixture(&root, "clip.mp4", "metadata only")?;
+    fixture(&root, "excluded/secret.md", "excluded from the index")?;
+    let options = IndexOptions {
+        exclude: Some(vec![PathBuf::from("excluded")]),
+    };
+    let mut captioner = FixtureCaptioner {
+        revision: "caption-v1",
+        calls: 0,
+    };
+    index.synchronize_with_image_captions(&root, &options, None, &mut original, &mut captioner)?;
+    let before = index.status()?;
+    let directory = temp.path().join("new-model");
+    let images = SearchOptions {
+        file_kind: Some(FileKind::Image),
+        ..Default::default()
+    };
+    let mut new = NewEncoder {
+        batches: 0,
+        fail: true,
+    };
+    assert!(index.rebuild_embeddings(&directory, &mut new).is_err());
+    assert!(new.batches > 1);
+    assert_eq!(index.embedding_model()?, before.model);
+    assert_eq!(index.embedding_model_directory()?, None);
+    assert_eq!(
+        index.search("refrigerator", &images, &mut original)?.len(),
+        1
+    );
+
+    new.fail = false;
+    assert_eq!(
+        index.rebuild_embeddings(&directory, &mut new)? as i64,
+        before.chunks
+    );
+    let after = index.status()?;
+    assert_eq!(after.model.as_deref(), Some(new.identity()));
+    assert_eq!(after.model_directory.as_deref(), Some(directory.as_path()));
+    assert_eq!(after.roots, before.roots);
+    assert_eq!((after.files, after.chunks), (before.files, before.chunks));
+    let hits = index.search("refrigerator", &images, &mut new)?;
+    assert!(
+        hits[0]
+            .snippet
+            .contains("A refrigerator next to a counter.")
+    );
+    let refreshed = index.synchronize(Some(&root), &Default::default(), &mut new)?;
+    assert_eq!((refreshed.written, refreshed.removed), (0, 0));
+    Ok(())
+}
+
+#[test]
 fn image_captions_share_document_search_and_refresh_incrementally() -> Result<()> {
     let (_temp, mut index, root, mut model) = new_fixture()?;
     let picture = fixture(&root, "0001.jpg", "kitchen")?;

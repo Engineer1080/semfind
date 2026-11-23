@@ -107,6 +107,7 @@ pub struct Status {
     pub commands: i64,
     pub chunks: i64,
     pub model: Option<String>,
+    pub model_directory: Option<PathBuf>,
 }
 
 impl Index {
@@ -162,6 +163,7 @@ impl Index {
             },
         )?;
         let model = model_identity(&tx)?;
+        let model_directory = model_directory(&tx)?;
         tx.commit()?;
         Ok(Status {
             roots,
@@ -171,12 +173,72 @@ impl Index {
             commands,
             chunks,
             model,
+            model_directory,
         })
     }
 
     /// Return the identity of the embedding model that populated this index.
     pub fn embedding_model(&self) -> Result<Option<String>> {
         model_identity(&self.conn)
+    }
+
+    /// Return the model directory saved by the last explicit model switch.
+    pub fn embedding_model_directory(&self) -> Result<Option<PathBuf>> {
+        model_directory(&self.conn)
+    }
+
+    /// Replace all existing semantic vectors using the indexed titles and passages.
+    /// Commit the new model directory and identity with the vectors in one transaction.
+    pub fn rebuild_embeddings(
+        &mut self,
+        directory: &Path,
+        model: &mut impl Embedder,
+    ) -> Result<usize> {
+        ensure!(!model.identity().is_empty(), "model identity is empty");
+        ensure!(directory.is_absolute(), "model directory must be absolute");
+        let directory = directory
+            .to_str()
+            .context("model directory must be valid UTF-8")?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute("DELETE FROM metadata WHERE key = 'dimensions'", [])?;
+        let mut written = 0;
+        {
+            let mut read = tx.prepare(
+                "SELECT c.id, s.title, f.body FROM chunks c
+                 JOIN sources s ON s.id = c.source
+                 LEFT JOIN fulltext f ON f.rowid = c.id
+                 WHERE c.id > ?1 AND length(c.embedding) > 0 ORDER BY c.id LIMIT 8",
+            )?;
+            let mut update = tx.prepare("UPDATE chunks SET embedding = ?1 WHERE id = ?2")?;
+            let mut after = 0;
+            loop {
+                let batch = read
+                    .query_map([after], |row| {
+                        let title: String = row.get(1)?;
+                        let body: String = row.get(2)?;
+                        Ok((row.get::<_, i64>(0)?, passage_input(&title, &body)))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                if batch.is_empty() {
+                    break;
+                }
+                let (ids, input): (Vec<_>, Vec<_>) = batch.into_iter().unzip();
+                let embeddings = encode_passages(&tx, &input, model)?;
+                for (id, embedding) in ids.into_iter().zip(embeddings) {
+                    update.execute(params![embedding, id])?;
+                    after = id;
+                    written += 1;
+                }
+            }
+        }
+        tx.execute(
+            "INSERT OR REPLACE INTO metadata VALUES ('model', ?1), ('model_directory', ?2)",
+            params![model.identity(), directory],
+        )?;
+        tx.commit()?;
+        Ok(written)
     }
 
     /// Synchronize the built-in catalogs and optionally a selected directory.
@@ -353,6 +415,9 @@ impl Index {
         let mut report = IndexReport::default();
         if force {
             // Reset vector-space metadata together with the vectors it describes.
+            if model_identity(&tx)?.as_deref() != Some(model.identity()) {
+                tx.execute("DELETE FROM metadata WHERE key = 'model_directory'", [])?;
+            }
             tx.execute(
                 "DELETE FROM metadata WHERE key IN ('model', 'dimensions')",
                 [],
@@ -515,7 +580,7 @@ pub(crate) fn check_model(conn: &Connection, model: &impl Embedder) -> Result<()
     if let Some(identity) = model_identity(conn)? {
         ensure!(
             identity == model.identity(),
-            "index uses a different embedding model. To switch models, run `semfind init --force` with the new model or use a separate `--index-dir`."
+            "index uses a different embedding model. Run `semfind reindex` with the new model to rebuild its vectors, use `semfind init --force` for a full rescan, or select a separate `--index-dir`."
         );
     }
     Ok(())
@@ -527,6 +592,16 @@ pub(crate) fn model_identity(conn: &Connection) -> Result<Option<String>> {
             "SELECT value FROM metadata WHERE key = 'model'",
             [],
             |row| row.get(0),
+        )
+        .optional()?)
+}
+
+fn model_directory(conn: &Connection) -> Result<Option<PathBuf>> {
+    Ok(conn
+        .query_row(
+            "SELECT value FROM metadata WHERE key = 'model_directory'",
+            [],
+            |row| row.get::<_, String>(0).map(PathBuf::from),
         )
         .optional()?)
 }
@@ -606,19 +681,35 @@ fn write_chunks(
     parts: &[Passage<'_>],
     model: &mut impl Embedder,
 ) -> Result<()> {
-    let title: String = source.title.chars().take(256).collect();
     let input: Vec<_> = parts
         .iter()
-        .map(|part| format!("{title}\n{}", part.text))
+        .map(|part| passage_input(source.title, part.text))
         .collect();
+    for (passage, bytes) in parts.iter().zip(encode_passages(tx, &input, model)?) {
+        store_chunk(tx, id, source, passage, &bytes)?;
+    }
+    Ok(())
+}
+
+fn passage_input(title: &str, body: &str) -> String {
+    let title: String = title.chars().take(256).collect();
+    format!("{title}\n{body}")
+}
+
+fn encode_passages(
+    tx: &Transaction<'_>,
+    input: &[String],
+    model: &mut impl Embedder,
+) -> Result<Vec<Vec<u8>>> {
     let vectors = model
-        .encode(InputKind::Passage, &input)
+        .encode(InputKind::Passage, input)
         .context("encode document passages")?;
     ensure!(
-        vectors.len() == parts.len(),
+        vectors.len() == input.len(),
         "unexpected number of embeddings"
     );
-    for (passage, vector) in parts.iter().zip(vectors) {
+    let mut embeddings = Vec::with_capacity(input.len());
+    for vector in vectors {
         let vector = normalized(vector)?;
         let width = vector.len();
         tx.execute(
@@ -634,10 +725,9 @@ fn write_chunks(
             declared.parse::<usize>()? == width,
             "inconsistent embedding dimensions"
         );
-        let bytes: Vec<_> = vector.into_iter().flat_map(f32::to_le_bytes).collect();
-        store_chunk(tx, id, source, passage, &bytes)?;
+        embeddings.push(vector.into_iter().flat_map(f32::to_le_bytes).collect());
     }
-    Ok(())
+    Ok(embeddings)
 }
 
 fn store_chunk(

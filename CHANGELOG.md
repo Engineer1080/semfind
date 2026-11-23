@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.6
+
+- Add **Switch Model** to the desktop app. Choose Granite 97M, Granite 311M, E5 Small, E5 Large, or a local custom ONNX model. Granite 97M remains the default for new indexes.
+- Show when the selected model is ready, whether its files were downloaded or already present. Keep existing model files and ask before rebuilding the index with the selected model.
+- Add `semfind reindex` to rebuild saved embeddings and save the model directory in one transaction. Preserve indexed folders and existing image descriptions, and keep the previous model and vectors if the rebuild fails.
+
 ## 0.3.5
 
 - Show the active index's embedding model and the last execution device in the desktop app. The device reflects CPU fallback and stays visible when a search reuses a cached embedding.

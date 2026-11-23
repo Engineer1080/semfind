@@ -14,7 +14,7 @@ Existing indexes remain searchable after Semfind 0.2.1 automatically upgrades th
 
 With `--json`, search writes a JSON array to stdout, including `[]` for zero results. Diagnostics go to stderr. Exit codes are `0` for success (including zero hits), `1` for an operational error, and `2` for invalid CLI usage.
 
-`status --json` includes `model_name` for the embedding model and `caption_model_name` for an available Florence-2 checkpoint. Use `--runtime-info` on a search, `index`, or `init` to get a JSON record prefixed with `semfind: runtime ` on stderr. `embedding_provider` reports the loaded ONNX provider after any automatic fallback. `caption_backend` reports the Florence-2 device when the caption worker started. If a worker was never loaded, its provider is `null`. `cache_hit` indicates a reused query embedding.
+`status --json` includes `model_name` for the embedding model, `model_directory` for a model directory saved by `reindex`, and `caption_model_name` for an available Florence-2 checkpoint. Use `--runtime-info` on a search, `index`, `reindex`, or `init` to get a JSON record prefixed with `semfind: runtime ` on stderr. `embedding_provider` reports the loaded ONNX provider after any automatic fallback. `caption_backend` reports the Florence-2 device when the caption worker started. If a worker was never loaded, its provider is `null`. `cache_hit` indicates a reused query embedding.
 
 ## Timing, cache, and model worker
 

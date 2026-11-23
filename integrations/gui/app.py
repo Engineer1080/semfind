@@ -36,6 +36,13 @@ DEVICES = {
     "CUDA": "CUDA (GPU)",
     "ROCm": "ROCm (GPU)",
 }
+EMBEDDING_MODELS = (
+    ("granite-97m", "Granite 97M Multilingual R2"),
+    ("granite-311m", "Granite 311M Multilingual R2"),
+    ("e5-small", "E5 Small"),
+    ("e5-large", "E5 Large"),
+    (None, "Custom ONNX model"),
+)
 
 
 def box(spacing=0, vertical=False, style=None):
@@ -78,11 +85,15 @@ def clear(box_widget):
         box_widget.remove(child)
 
 
-def run_process(arguments, complete):
+def run_process(arguments, complete, *, override_model=False):
     """Collect both pipes asynchronously so CLI output cannot block the window."""
     flags = Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
+    launcher = Gio.SubprocessLauncher.new(flags)
+    if override_model:
+        launcher.unsetenv("SEMFIND_MODEL")
+        launcher.unsetenv("SEMFIND_MODEL_DIR")
     try:
-        process = Gio.Subprocess.new(arguments, flags)
+        process = launcher.spawnv(arguments)
     except GLib.Error as error:
         GLib.idle_add(complete, None, error.message)
         return None
@@ -284,9 +295,20 @@ class SearchWindow(Gtk.ApplicationWindow):
         self.update_device_labels()
         if not self.active_query:
             self.show_welcome()
+        return True
 
-    def refresh_status(self):
-        run_process([self.cli, "status", "--json"], self.update_status)
+    def run_cli(self, arguments, complete, *, model_dir=None):
+        directory = model_dir or self.status.get("model_directory")
+        model_options = ["--model-dir", directory] if directory else []
+        return run_process([self.cli, *model_options, *arguments], complete, override_model=bool(directory))
+
+    def refresh_status(self, after=None):
+        def completed(output, stderr):
+            updated = self.update_status(output, stderr)
+            if after:
+                after(updated)
+
+        self.run_cli(["status", "--json"], completed)
 
     def runtime_options(self):
         return ["--runtime-info"] if "model_name" in self.status else []
@@ -326,11 +348,11 @@ class SearchWindow(Gtk.ApplicationWindow):
 
     def show_welcome(self):
         clear(self.content)
-        if not self.status.get("model"):
+        if not self.status.get("chunks"):
             welcome = box(10, vertical=True, style="surface")
             welcome.append(label("Make your files searchable", "card-title"))
             welcome.append(label(
-                "Download the local model, then index a folder or your home directory.",
+                "Choose an embedding model, then index a folder or your home directory.",
                 "muted", wrap=True,
             ))
             welcome.append(button("Set up your index", self.manage_index, "quiet", "folder-symbolic"))
@@ -370,7 +392,7 @@ class SearchWindow(Gtk.ApplicationWindow):
             self.show_welcome()
             return
 
-        arguments = [self.cli, "search", "--json", "--limit", "30", "--no-gpu-hint"]
+        arguments = ["search", "--json", "--limit", "30", "--no-gpu-hint"]
         arguments.extend(self.runtime_options())
         if self.category:
             arguments += ["--category", self.category]
@@ -397,7 +419,7 @@ class SearchWindow(Gtk.ApplicationWindow):
             self.feedback()
             self.render_results(hits)
 
-        self.search_process = run_process([*arguments, "--", query], completed)
+        self.search_process = self.run_cli([*arguments, "--", query], completed)
 
     def show_error_details(self, error):
         self.content.append(button("Show error details", lambda: self.alert(
@@ -521,13 +543,77 @@ class SearchWindow(Gtk.ApplicationWindow):
             roots.append(row)
 
         buttons = box(8)
-        buttons.append(button("Download model", lambda: self.download_model(dialog), "quiet"))
+        buttons.append(button("Switch Model", lambda: self.switch_model(dialog), "quiet"))
         buttons.append(button("Index home", lambda: self.index_home(dialog), "quiet"))
         buttons.append(button("Choose folder", lambda: self.choose_folder(dialog), "primary"))
         container.append(buttons)
         dialog.present()
 
-    def download_model(self, dialog):
+    def switch_model(self, manage_dialog):
+        if "model_directory" not in self.status:
+            manage_dialog.close()
+            self.alert("Model switching unavailable", "Use an up-to-date Semfind CLI with this desktop app.")
+            return
+        manage_dialog.close()
+        dialog = Gtk.Window(title="Switch Model", transient_for=self, modal=True, default_width=490)
+        dialog.add_css_class("semfind")
+        dialog.set_titlebar(Gtk.HeaderBar())
+        content = box(14, vertical=True, style="workspace")
+        dialog.set_child(content)
+        current_name = self.status.get("model_name", "Granite 97M Multilingual R2")
+        content.append(label(f"Current model · {current_name}", "card-title", wrap=True))
+        names = [name for _, name in EMBEDDING_MODELS]
+        choices = Gtk.DropDown.new_from_strings(names)
+        current_choice = current_name.removesuffix(" (INT8)")
+        choices.set_selected(names.index(current_choice) if current_choice in names else 0)
+        choices.update_property([Gtk.AccessibleProperty.LABEL], ["Embedding model"])
+        content.append(choices)
+        hint = label("", "muted", wrap=True)
+        content.append(hint)
+
+        def prepare():
+            model, name = EMBEDDING_MODELS[choices.get_selected()]
+            if model:
+                dialog.close()
+                self.prepare_model(model, name)
+                return
+
+            chooser = Gtk.FileDialog(title="Choose a custom ONNX model folder")
+
+            def selected(chooser, result):
+                try:
+                    folder = chooser.select_folder_finish(result).get_path()
+                except GLib.Error:
+                    return
+                required = ("model.onnx", "tokenizer.json", "semfind-model.json")
+                if not folder or not all((Path(folder) / filename).is_file() for filename in required):
+                    hint.set_label("Choose a local folder with model.onnx, tokenizer.json, and semfind-model.json.")
+                    return
+                dialog.close()
+                self.model_ready(name, folder, "Local model selected.")
+
+            chooser.select_folder(dialog, None, selected)
+
+        actions = box(8)
+        actions.set_halign(Gtk.Align.END)
+        actions.append(button("Cancel", dialog.close, "quiet"))
+        primary = button("Download", prepare, "primary")
+        actions.append(primary)
+        content.append(actions)
+
+        def update_choice(*_args):
+            custom = EMBEDDING_MODELS[choices.get_selected()][0] is None
+            primary.set_label("Choose folder…" if custom else "Download")
+            hint.set_label(
+                "Use a local ONNX model and tokenizer with a Semfind model config." if custom else
+                "Semfind keeps your current model and reuses any verified files for the selected one."
+            )
+
+        choices.connect("notify::selected", update_choice)
+        update_choice()
+        dialog.present()
+
+    def prepare_model(self, model, name):
         packaged = Path(self.cli).with_name("semfind-download-model")
         source = HERE.parents[1] / "scripts/download_model.py"
         if packaged.is_file():
@@ -537,10 +623,37 @@ class SearchWindow(Gtk.ApplicationWindow):
         else:
             self.alert("Model downloader unavailable", "Run the model downloader from your Semfind installation.")
             return
-        if identity := self.status.get("model"):
-            arguments.extend(("--index-model", identity))
-        dialog.close()
-        self.start_job(arguments, "Downloading the embedding model")
+        arguments.extend(("--model", model, "--managed", "--json"))
+        if model == "e5-small" and self.status.get("model_name") == "E5 Small (INT8)":
+            arguments.extend(("--variant", "int8"))
+            name = "E5 Small (INT8)"
+
+        def ready(output):
+            try:
+                result = json.loads(output)
+                directory = result["directory"]
+                if not isinstance(directory, str) or not Path(directory).is_absolute():
+                    raise ValueError("expected an absolute model directory")
+            except (KeyError, TypeError, ValueError):
+                self.feedback("The model downloader returned an unreadable response.", error=True)
+                return
+            detail = "Download complete." if result.get("downloaded") else "Model files are already available."
+            self.model_ready(name, directory, detail)
+
+        self.start_job(f"Preparing {name}", lambda complete: run_process(arguments, complete), on_success=ready)
+
+    def model_ready(self, name, directory, detail):
+        self.feedback(f"{name} is ready.")
+        if self.status.get("chunks"):
+            detail += " Reindex saved passages to activate this model. Your folders and image descriptions are kept."
+            action = "Reindex"
+        else:
+            detail += " Use this model for the next folder or home scan."
+            action = "Use model"
+        self.confirm(f"{name} is ready", detail, action,
+                     lambda: self.start_index_job(
+                         ["reindex", *self.runtime_options()], f"Activating {name}", model_dir=directory,
+                     ))
 
     def choose_folder(self, dialog):
         chooser = Gtk.FileDialog(title="Choose a folder to index")
@@ -557,23 +670,26 @@ class SearchWindow(Gtk.ApplicationWindow):
 
     def refresh_folder(self, dialog, folder):
         dialog.close()
-        self.start_job([self.cli, "index", *self.runtime_options(), "--", folder], "Indexing the selected folder")
+        self.start_index_job(["index", *self.runtime_options(), "--", folder], "Indexing the selected folder")
 
     def index_home(self, dialog):
         dialog.close()
         self.confirm("Index your home directory?",
                      "This scans supported files under your home directory and updates installed apps and local commands.",
                      "Index home",
-                     lambda: self.start_job([self.cli, "init", *self.runtime_options()], "Indexing your home directory"))
+                     lambda: self.start_index_job(["init", *self.runtime_options()], "Indexing your home directory"))
 
     def remove_folder(self, dialog, folder):
         dialog.close()
         self.confirm("Remove this folder from the index?",
                      f"Semfind will remove its index entries. Your files stay at {folder}.",
                      "Remove",
-                     lambda: self.start_job([self.cli, "unindex", "--", folder], "Updating the index"))
+                     lambda: self.start_index_job(["unindex", "--", folder], "Updating the index"))
 
-    def start_job(self, arguments, title):
+    def start_index_job(self, arguments, title, *, model_dir=None):
+        self.start_job(title, lambda complete: self.run_cli(arguments, complete, model_dir=model_dir))
+
+    def start_job(self, title, launch, *, on_success=None):
         if self.job:
             return
         self.cancel_search()
@@ -591,22 +707,31 @@ class SearchWindow(Gtk.ApplicationWindow):
         progress()
         timer = GLib.timeout_add(140, progress)
 
-        def complete(output, stderr):
-            GLib.source_remove(timer)
+        def finish():
             self.job = None
             self.search_button.set_sensitive(True)
             self.progress.set_visible(False)
+
+        def refreshed(updated):
+            finish()
+            if updated and self.active_query:
+                self.search()
+
+        def complete(output, stderr):
+            GLib.source_remove(timer)
             if output is None:
+                finish()
                 self.feedback(f"{title} failed.", error=True)
                 self.alert("Semfind reported an error", stderr[-1600:])
+            elif on_success:
+                finish()
+                on_success(output)
             else:
                 self.update_runtime(stderr)
                 self.feedback(output.strip().splitlines()[-1] if output.strip() else "Done.")
-                if self.active_query:
-                    self.search()
-            self.refresh_status()
+                self.refresh_status(refreshed)
 
-        run_process(arguments, complete)
+        launch(complete)
 
 
 class SemfindApplication(Gtk.Application):

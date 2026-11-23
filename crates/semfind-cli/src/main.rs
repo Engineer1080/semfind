@@ -204,6 +204,12 @@ enum Command {
         #[arg(long, requires = "root", conflicts_with = "exclude")]
         clear_excludes: bool,
     },
+    /// Rebuild the saved passages with the selected embedding model.
+    Reindex {
+        /// Report model execution providers as JSON on stderr.
+        #[arg(long)]
+        runtime_info: bool,
+    },
     /// Show indexed roots and counts without loading the model.
     Status {
         #[arg(long)]
@@ -585,8 +591,13 @@ fn run(
             .map_or(ModelChoice::Granite97M, ModelChoice::for_index),
         _ => ModelChoice::Granite97M,
     };
+    let saved_model_directory = if cli.model.is_none() && cli.model_dir.is_none() {
+        index.embedding_model_directory()?
+    } else {
+        None
+    };
     let model_directory = || -> Result<PathBuf> {
-        match &cli.model_dir {
+        match cli.model_dir.as_ref().or(saved_model_directory.as_ref()) {
             Some(path) => Ok(path.clone()),
             None => Ok(data_dir(messages)?
                 .join("model")
@@ -705,6 +716,17 @@ fn run(
                 root.display()
             );
             writeln!(output, "{} {}", messages.root_removed, root.display())?;
+        }
+        Some(Command::Reindex { runtime_info }) => {
+            let directory = std::path::absolute(model_directory()?)?;
+            let mut model = start_model()?;
+            gpu_hint.show(model.uses_cpu(), false);
+            let passages = index.rebuild_embeddings(&directory, &mut model)?;
+            gpu_hint.show(model.uses_cpu(), false);
+            if runtime_info {
+                report_index_runtime(&model, None);
+            }
+            writeln!(output, "Rebuilt embeddings for {passages} passages.")?;
         }
         Some(Command::Init {
             force,

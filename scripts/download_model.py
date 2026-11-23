@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Download the pinned embedding artifacts. Defaults to Granite 97M Multilingual R2."""
 import argparse
+import errno
 import hashlib
+import json
 import os
 from pathlib import Path
+import sys
 import tempfile
 from urllib.request import urlopen
 
@@ -106,12 +109,12 @@ def checksum(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def download(base, upstream, target, expected):
+def download(base, upstream, target, expected, progress):
     if target.is_file():
         if checksum(target) == expected:
-            return
+            return False
         raise SystemExit(f"{target} already exists with a different checksum. Use a new model directory.")
-    print(f"Downloading {upstream}", flush=True)
+    print(f"Downloading {upstream}", file=progress, flush=True)
     with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as stream:
         temporary = Path(stream.name)
     try:
@@ -122,9 +125,41 @@ def download(base, upstream, target, expected):
                 stream.write(block)
         if digest.hexdigest() != expected:
             raise SystemExit(f"SHA-256 mismatch for {upstream}")
-        os.replace(temporary, target)
+        try:
+            os.link(temporary, target)
+        except FileExistsError:
+            if target.is_file() and checksum(target) == expected:
+                return False
+            raise SystemExit(f"{target} already exists with different contents. Use a new model directory.") from None
+        except OSError as error:
+            if error.errno not in (errno.EOPNOTSUPP, errno.EPERM) or target.exists():
+                raise
+            os.replace(temporary, target)
+        return True
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def managed_directory(root, subdirectory, model, variant, artifacts):
+    directory = root / subdirectory
+    if not has_conflicting_artifacts(directory, artifacts):
+        return directory
+    revision = hashlib.sha256("".join(digest for _, digest in artifacts.values()).encode()).hexdigest()[:16]
+    directory = root / "managed" / f"{model}-{variant}-{revision}"
+    if has_conflicting_artifacts(directory, artifacts):
+        raise SystemExit(f"{directory} contains conflicting model files.")
+    return directory
+
+
+def has_conflicting_artifacts(directory, artifacts):
+    for filename, (_, digest) in artifacts.items():
+        path = directory / filename
+        if (path.exists() or path.is_symlink()) and (not path.is_file() or checksum(path) != digest):
+            return True
+    if "model.onnx" in artifacts:
+        extra_files = {"semfind-model.json", "model.onnx_data"} - artifacts.keys()
+        return any((directory / name).exists() for name in extra_files)
+    return False
 
 
 def main():
@@ -132,7 +167,10 @@ def main():
     if not default_data.is_absolute():
         default_data = Path.home() / ".local" / "share"
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--directory", type=Path)
+    destination = parser.add_mutually_exclusive_group()
+    destination.add_argument("--directory", type=Path)
+    destination.add_argument("--managed", action="store_true", help="Use Semfind's model storage and keep conflicting artifacts.")
+    parser.add_argument("--json", action="store_true", help="Report the model directory and whether files were downloaded as JSON.")
     models = ("granite-97m", "e5-small", *EXTRA_MODELS)
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--model", choices=models)
@@ -154,13 +192,21 @@ def main():
     if variant != "fp32" and model != "e5-small":
         parser.error("Only E5 Small is available as INT8 in this downloader")
     base, subdirectory, artifacts = model_artifacts(model, variant)
-    default_directory = default_data / "semfind" / "model" / subdirectory
+    root = default_data / "semfind" / "model"
     variable = "SEMFIND_CAPTION_MODEL_DIR" if model == "florence-2" else "SEMFIND_MODEL_DIR"
-    directory = args.directory or Path(os.getenv(variable) or default_directory)
+    if args.managed:
+        directory = managed_directory(root, subdirectory, model, variant, artifacts)
+    else:
+        directory = args.directory or Path(os.getenv(variable) or root / subdirectory)
     directory.mkdir(parents=True, exist_ok=True)
+    progress = sys.stderr if args.json else sys.stdout
+    downloaded = False
     for filename, (upstream, digest) in artifacts.items():
-        download(base, upstream, directory / filename, digest)
-    print(f"Model ready in {directory}")
+        downloaded |= download(base, upstream, directory / filename, digest, progress)
+    if args.json:
+        print(json.dumps({"directory": str(directory.absolute()), "downloaded": downloaded}))
+    else:
+        print(f"Model ready in {directory}")
 
 
 if __name__ == "__main__":
