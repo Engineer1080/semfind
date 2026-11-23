@@ -55,7 +55,7 @@ Provides:
   binaries:
   - semfind-gui
 Releases:
-- version: 0.3.5-1
+- version: 0.3.6-1
   type: stable
   unix-timestamp: 1795392000
 ContentRating:
