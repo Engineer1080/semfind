@@ -41,7 +41,13 @@ Url:
   homepage: https://github.com/Engineer1080/semfind
   bugtracker: https://github.com/Engineer1080/semfind/issues
 Icon:
-  stock: system-search
+  cached:
+  - name: io.github.engineer1080.semfind.png
+    width: 64
+    height: 64
+  - name: io.github.engineer1080.semfind.png
+    width: 128
+    height: 128
 Launchable:
   desktop-id:
   - io.github.engineer1080.semfind.desktop
@@ -49,7 +55,7 @@ Provides:
   binaries:
   - semfind-gui
 Releases:
-- version: 0.3.3-2
+- version: 0.3.3-3
   type: stable
   unix-timestamp: 1795392000
 ContentRating:
