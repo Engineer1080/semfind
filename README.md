@@ -13,7 +13,7 @@ $ semfind "Wie lange sollen personenbezogene Daten gespeichert werden?" --catego
 
 ## Quickstart
 
-For Ubuntu 24.04 and Pop!_OS 24.04 on amd64, see the [Debian package and APT guide](docs/apt.md) to build and try the CLI and optional desktop app.
+On Ubuntu 24.04 and Pop!_OS 24.04 on amd64, install the CLI or optional desktop app from the [signed Semfind APT repository](docs/apt.md#add-the-published-source).
 
 <a name="install-on-pop_os-2404"></a>
 
