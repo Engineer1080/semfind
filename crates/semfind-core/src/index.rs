@@ -515,7 +515,7 @@ pub(crate) fn check_model(conn: &Connection, model: &impl Embedder) -> Result<()
     if let Some(identity) = model_identity(conn)? {
         ensure!(
             identity == model.identity(),
-            "index uses a different embedding model (use a new index directory or rebuild)"
+            "index uses a different embedding model. To switch models, run `semfind init --force` with the new model or use a separate `--index-dir`."
         );
     }
     Ok(())

@@ -14,7 +14,16 @@ semfind 'How do I find files modified today?'
 
 E5 Small also has an INT8 variant for compatible CPUs. Download it with `python scripts/download_model.py --model e5-small --variant int8`. Use a separate model and index directory when you want to keep multiple variants.
 
-Keep the same model and index settings for subsequent searches. To change models or weights, use a new index directory or rebuild the current index with `semfind init --force`. Each index records the exact embedding identity and refuses to combine incompatible vectors.
+Without an explicit model selection, Semfind uses the built-in model recorded for an existing index. Keep the model directory available for the weights and tokenizer used to create the index. A custom model still requires its configured directory.
+
+To replace the current index's model, download the new model and explicitly select it for a full rebuild. For example, to switch an existing E5 index to Granite 97M after installing Semfind through APT:
+
+```bash
+semfind-download-model --model granite-97m
+semfind init --force --model granite-97m
+```
+
+If you set `SEMFIND_MODEL` or `SEMFIND_MODEL_DIR` in your shell, update or unset the old setting before switching. The same rebuild is needed when the weights or tokenizer change. Search and incremental indexing reject a model whose embedding identity differs from the recorded identity. To keep both models in use, give each a separate index directory as shown above.
 
 ## Use your own model
 

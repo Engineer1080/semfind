@@ -128,7 +128,7 @@ def main():
         parser.error("Build this package on amd64 with Python 3.12 and pip.")
     os.umask(0o022)
     upstream = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"]["version"]
-    version = f"{upstream}-3"
+    version = f"{upstream}-1"
     args.output.mkdir(parents=True, exist_ok=True)
     output = args.output.resolve()
     with tempfile.TemporaryDirectory(prefix="semfind-deb-", dir=args.output) as directory:

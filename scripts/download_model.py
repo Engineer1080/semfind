@@ -74,6 +74,33 @@ EXTRA_MODELS = {
 }
 
 
+def model_artifacts(model, variant):
+    if model == "e5-small":
+        return E5_BASE, "", {"tokenizer.json": E5_TOKENIZER, "model.onnx": E5_WEIGHTS[variant]}
+    if model == "granite-97m":
+        return GRANITE_BASE, "granite-97m-r2", {
+            "tokenizer.json": GRANITE_TOKENIZER, "model.onnx": GRANITE_WEIGHTS,
+        }
+    return EXTRA_MODELS[model]
+
+
+def model_for_index(identity):
+    candidates = (
+        ("e5-small", "fp32"), ("e5-small", "int8"), ("e5-large", "fp32"),
+        ("granite-97m", "fp32"), ("granite-311m", "fp32"),
+    )
+    for model, variant in candidates:
+        _, _, artifacts = model_artifacts(model, variant)
+        recipe = "granite-r2-cls-512-v1" if model.startswith("granite-") else "e5-mean-pool-v1"
+        files = ("model.onnx", "tokenizer.json", "model.onnx_data")
+        if identity == ":".join([recipe, *(artifacts[name][1] for name in files if name in artifacts)]):
+            return model, variant
+    raise SystemExit(
+        "This index requires a model outside the pinned downloads. "
+        "Use its original model directory or choose a separate index for a built-in model."
+    )
+
+
 def checksum(path):
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
@@ -107,25 +134,27 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path)
     models = ("granite-97m", "e5-small", *EXTRA_MODELS)
-    parser.add_argument("--model", choices=models)
-    parser.add_argument("--variant", choices=E5_WEIGHTS, default="fp32")
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--model", choices=models)
+    selection.add_argument("--index-model", help="Download the exact built-in model used by this index identity.")
+    parser.add_argument("--variant", choices=E5_WEIGHTS)
     args = parser.parse_args()
-    model = args.model or os.getenv("SEMFIND_MODEL") or ("e5-small" if args.variant == "int8" else "granite-97m")
+    configured_model = os.getenv("SEMFIND_MODEL")
+    variant = args.variant or "fp32"
+    if args.index_model:
+        model, variant = model_for_index(args.index_model)
+        if configured_model and configured_model != model:
+            parser.error(f"This index uses {model}, but SEMFIND_MODEL selects {configured_model}.")
+        if args.variant and args.variant != variant:
+            parser.error(f"This index requires the {variant} variant.")
+    else:
+        model = args.model or configured_model or ("e5-small" if variant == "int8" else "granite-97m")
     if model not in models:
         parser.error(f"Unknown SEMFIND_MODEL: {model}")
-    if args.variant != "fp32" and model != "e5-small":
+    if variant != "fp32" and model != "e5-small":
         parser.error("Only E5 Small is available as INT8 in this downloader")
-    default_directory = default_data / "semfind" / "model"
-    if model == "granite-97m":
-        default_directory /= "granite-97m-r2"
-        base = GRANITE_BASE
-        artifacts = {"tokenizer.json": GRANITE_TOKENIZER, "model.onnx": GRANITE_WEIGHTS}
-    elif model == "e5-small":
-        base = E5_BASE
-        artifacts = {"tokenizer.json": E5_TOKENIZER, "model.onnx": E5_WEIGHTS[args.variant]}
-    else:
-        base, subdirectory, artifacts = EXTRA_MODELS[model]
-        default_directory /= subdirectory
+    base, subdirectory, artifacts = model_artifacts(model, variant)
+    default_directory = default_data / "semfind" / "model" / subdirectory
     variable = "SEMFIND_CAPTION_MODEL_DIR" if model == "florence-2" else "SEMFIND_MODEL_DIR"
     directory = args.directory or Path(os.getenv(variable) or default_directory)
     directory.mkdir(parents=True, exist_ok=True)

@@ -17,3 +17,7 @@ Use `--semfind /path/to/semfind` to select a particular executable or wrapper. T
 ## Manage the index
 
 Open **Manage index** to download an embedding model and index a selected folder or your home directory. A home scan also indexes installed applications and local command manuals. A progress indicator and elapsed time remain visible while the CLI is working. Refresh or remove a folder from the list to update its index entries. Press **Ctrl+K** to focus the search box.
+
+**Download model** defaults to Granite 97M for a new index. For an existing index, it retrieves the exact built-in model used to create it. For a custom model, keep its original directory available through `SEMFIND_MODEL_DIR`. Use the CLI to [switch models and rebuild the index](../../docs/models.md#choose-an-embedding-model).
+
+To open the desktop app with a separate index and model, close the running app and launch it from a terminal with `SEMFIND_INDEX_DIR` and `SEMFIND_MODEL` set. The selected index then applies to searches and all actions in **Manage index**.

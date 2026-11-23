@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.4
+
+- Fix **Download model** in the desktop app for existing indexes. It retrieves the exact supported ONNX weights and tokenizer used by the index, including the E5 Small INT8 variant. Granite 97M remains the default for new indexes.
+- Automatically select the matching installed model directory when opening existing E5 Large and Granite 311M indexes without an explicit model selection.
+- Explain how to switch models when a search or incremental scan detects incompatible embeddings. Rebuild with `semfind init --force` or maintain a separate index with `--index-dir`.
+
 ## 0.3.3
 
 - Add an optional GTK 4 desktop app that searches the same local index as the CLI. Filter results by category, read file excerpts, open files and apps, and copy command examples.

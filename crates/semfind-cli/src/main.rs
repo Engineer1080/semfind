@@ -41,7 +41,7 @@ struct Cli {
     /// Directory containing the local Florence-2 checkpoint.
     #[arg(long, env = "SEMFIND_CAPTION_MODEL_DIR", global = true)]
     caption_model_dir: Option<PathBuf>,
-    /// Select an embedding model installed by scripts/download_model.py.
+    /// Select an embedding model. New indexes default to Granite 97M.
     #[arg(long, env = "SEMFIND_MODEL", value_enum, global = true)]
     model: Option<ModelChoice>,
     /// Inference backend. Auto tries CUDA, MIGraphX, then CPU.
@@ -101,6 +101,24 @@ impl ModelChoice {
             Self::E5Large => "e5-large",
             Self::Granite97M => "granite-97m-r2",
             Self::Granite311M => "granite-311m-r2",
+        }
+    }
+
+    fn for_index(identity: &str) -> Self {
+        let mut parts = identity.split(':');
+        let recipe = parts.next();
+        let tokenizer = parts.nth(1);
+        match (recipe, tokenizer) {
+            (
+                Some("e5-mean-pool-v1"),
+                Some("62c24cdc13d4c9952d63718d6c9fa4c287974249e16b7ade6b5d85e7bbb75626"),
+            ) => Self::E5Large,
+            (Some("e5-mean-pool-v1"), _) => Self::E5Small,
+            (
+                Some("granite-r2-cls-512-v1"),
+                Some("0087c868b33bad550a78a08d19798cfd7f713cde4f020803b8f51f405503e15f"),
+            ) => Self::Granite311M,
+            _ => Self::Granite97M,
         }
     }
 }
@@ -513,13 +531,10 @@ fn run(
     }
     let selected_model = match (cli.model, &cli.model_dir) {
         (Some(choice), _) => choice,
-        (None, None)
-            if index
-                .embedding_model()?
-                .is_some_and(|identity| identity.starts_with("e5-mean-pool-v1:")) =>
-        {
-            ModelChoice::E5Small
-        }
+        (None, None) => index
+            .embedding_model()?
+            .as_deref()
+            .map_or(ModelChoice::Granite97M, ModelChoice::for_index),
         _ => ModelChoice::Granite97M,
     };
     let model_directory = || -> Result<PathBuf> {

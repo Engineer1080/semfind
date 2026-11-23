@@ -33,7 +33,7 @@ The COSMIC Store shows the desktop app as **Semfind**. Its package is `semfind-g
 
 After a new package is published, `sudo apt update` fetches its metadata and `sudo apt upgrade` can install it. The archive key is scoped to this source through `Signed-By`.
 
-The AppStream catalog points to `semfind-gui`, so installing Semfind from a compatible store also pulls in the CLI. Installation through the COSMIC Store still needs verification. Ubuntu 24.04 App Center lists Debian packages from Ubuntu's official repositories. An official store listing there requires admission to the Ubuntu archive. [System76 package documentation](https://system76.com/support/managing-apps) · [Ubuntu App Center documentation](https://ubuntu.com/desktop/docs/en/24.04/explanation/snap-and-deb-packages/)
+The COSMIC Store can install Semfind after you add the signed APT source. The AppStream catalog points to `semfind-gui`, which also pulls in the CLI. Ubuntu 24.04 App Center lists Debian packages from Ubuntu's official repositories. An official store listing there requires admission to the Ubuntu archive. [System76 package documentation](https://system76.com/support/managing-apps) · [Ubuntu App Center documentation](https://ubuntu.com/desktop/docs/en/24.04/explanation/snap-and-deb-packages/)
 
 ## Build and try the package
 
@@ -50,7 +50,7 @@ The builder downloads the Python wheels listed in `requirements.txt` and their d
 Install the resulting CLI package using APT. Substitute your built version in the filename if it differs from the example.
 
 ```bash
-sudo apt install ./target/deb/semfind_0.3.3-3_amd64.deb
+sudo apt install ./target/deb/semfind_0.3.4-1_amd64.deb
 semfind-download-model
 semfind init
 semfind "How do I show free disk space?" --category command
@@ -59,7 +59,7 @@ semfind "How do I show free disk space?" --category command
 To install the desktop app from a local build, give APT both local packages so it can resolve the CLI dependency.
 
 ```bash
-sudo apt install ./target/deb/semfind_0.3.3-3_amd64.deb ./target/deb/semfind-gui_0.3.3-3_all.deb
+sudo apt install ./target/deb/semfind_0.3.4-1_amd64.deb ./target/deb/semfind-gui_0.3.4-1_all.deb
 ```
 
 Open Semfind from the application menu, or run `semfind-gui`. Use **Manage index** to download the model and choose a folder to index. Run the Semfind commands as your regular user. The model and index use the existing Semfind data directory under `$XDG_DATA_HOME` (usually `~/.local/share/semfind`). Installing, upgrading, or removing the packages leaves that directory intact.
@@ -74,8 +74,8 @@ The generator builds a complete snapshot with package checksums, an AppStream ca
 python3.12 packaging/deb/repository.py \
   --output target/apt-noble \
   --signing-key YOUR_SIGNING_KEY_FINGERPRINT \
-  target/deb/semfind_0.3.3-3_amd64.deb \
-  target/deb/semfind-gui_0.3.3-3_all.deb
+  target/deb/semfind_0.3.4-1_amd64.deb \
+  target/deb/semfind-gui_0.3.4-1_all.deb
 ```
 
 Publish the generated directory as a unit at a stable HTTPS URL. Keep the private signing key outside the published directory. For a later release, build a new snapshot and supply the new package together with any older packages you still want to serve. Keep published packages immutable by releasing any change under a new version.

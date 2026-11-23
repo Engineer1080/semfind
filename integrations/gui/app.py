@@ -457,6 +457,8 @@ class SearchWindow(Gtk.ApplicationWindow):
         else:
             self.alert("Model downloader unavailable", "Run the model downloader from your Semfind installation.")
             return
+        if identity := self.status.get("model"):
+            arguments.extend(("--index-model", identity))
         dialog.close()
         self.start_job(arguments, "Downloading the embedding model")
 
