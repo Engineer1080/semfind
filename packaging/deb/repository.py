@@ -41,6 +41,17 @@ def write_catalog(newest, dep11, build):
     metadata = extracted / f"usr/share/metainfo/{APP_ID}.metainfo.xml"
     run("appstreamcli", "validate", "--no-net", metadata)
     component = ET.parse(metadata).getroot()
+    # Metainfo localizes individual paragraphs. Catalog XML localizes whole descriptions.
+    description = component.find("description")
+    language_attribute = "{http://www.w3.org/XML/1998/namespace}lang"
+    localized = {}
+    for paragraph in list(description):
+        language = paragraph.attrib.pop(language_attribute, None)
+        if language:
+            if language not in localized:
+                localized[language] = ET.SubElement(component, "description", {language_attribute: language})
+            description.remove(paragraph)
+            localized[language].append(paragraph)
     ET.SubElement(component, "pkgname").text = "semfind-gui"
     ET.SubElement(component, "icon", type="stock").text = "system-search"
     catalog = ET.Element("components", origin="semfind", version="0.16")

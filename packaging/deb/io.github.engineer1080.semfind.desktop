@@ -2,6 +2,7 @@
 Type=Application
 Name=Semfind
 Comment=Search local files, applications, and Linux commands by meaning
+Comment[de]=Dateien, Programme und Linux-Befehle nach Bedeutung suchen
 Exec=/usr/bin/semfind-gui
 TryExec=/usr/bin/semfind-gui
 Icon=system-search
