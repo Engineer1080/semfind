@@ -1,6 +1,6 @@
 ---
 File: DEP-11
-Version: 1.0
+Version: '1.0'
 Origin: semfind
 ---
 Type: desktop-application
@@ -55,7 +55,7 @@ Provides:
   binaries:
   - semfind-gui
 Releases:
-- version: 0.3.3-3
+- version: 0.3.4-1
   type: stable
   unix-timestamp: 1795392000
 ContentRating:
