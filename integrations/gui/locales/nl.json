@@ -28,6 +28,7 @@
   "Copy": "Kopiëren",
   "Could not launch the application": "Toepassing kon niet worden gestart",
   "Could not open the file": "Bestand kon niet worden geopend",
+  "Could not open the setting": "Instelling kon niet worden geopend",
   "Ctrl+K to focus search": "Ctrl+K om naar het zoekveld te gaan",
   "Current model · {name}": "Huidig model · {name}",
   "Custom ONNX model": "Eigen ONNX-model",

@@ -28,6 +28,7 @@
   "Copy": "コピー",
   "Could not launch the application": "アプリを起動できませんでした",
   "Could not open the file": "ファイルを開けませんでした",
+  "Could not open the setting": "設定を開けませんでした",
   "Ctrl+K to focus search": "Ctrl+K で検索欄に移動",
   "Current model · {name}": "現在のモデル · {name}",
   "Custom ONNX model": "カスタム ONNX モデル",

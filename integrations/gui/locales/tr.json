@@ -28,6 +28,7 @@
   "Copy": "Kopyala",
   "Could not launch the application": "Uygulama başlatılamadı",
   "Could not open the file": "Dosya açılamadı",
+  "Could not open the setting": "Ayar açılamadı",
   "Ctrl+K to focus search": "Arama kutusuna geçmek için Ctrl+K",
   "Current model · {name}": "Geçerli model · {name}",
   "Custom ONNX model": "Özel ONNX modeli",

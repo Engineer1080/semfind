@@ -28,6 +28,7 @@
   "Copy": "复制",
   "Could not launch the application": "无法启动应用程序",
   "Could not open the file": "无法打开文件",
+  "Could not open the setting": "无法打开设置",
   "Ctrl+K to focus search": "按 Ctrl+K 聚焦搜索框",
   "Current model · {name}": "当前模型 · {name}",
   "Custom ONNX model": "自定义 ONNX 模型",

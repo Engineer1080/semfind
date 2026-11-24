@@ -28,6 +28,7 @@
   "Copy": "Copia",
   "Could not launch the application": "Impossibile avviare l’applicazione",
   "Could not open the file": "Impossibile aprire il file",
+  "Could not open the setting": "Impossibile aprire l’impostazione",
   "Ctrl+K to focus search": "Ctrl+K per attivare il campo di ricerca",
   "Current model · {name}": "Modello attuale · {name}",
   "Custom ONNX model": "Modello ONNX personalizzato",

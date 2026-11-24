@@ -28,6 +28,7 @@
   "Copy": "Копировать",
   "Could not launch the application": "Не удалось запустить приложение",
   "Could not open the file": "Не удалось открыть файл",
+  "Could not open the setting": "Не удалось открыть настройку",
   "Ctrl+K to focus search": "Ctrl+K — перейти в поле поиска",
   "Current model · {name}": "Текущая модель · {name}",
   "Custom ONNX model": "Пользовательская модель ONNX",

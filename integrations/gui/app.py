@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -29,6 +30,60 @@ HIT_LABELS = {
     "file": _("File"), "application": _("Application"), "command": _("Command"),
     "setting": _("Setting"), "action": _("Action"),
 }
+WIFI_EDITOR = ("nm-connection-editor", "--show", "--type", "802-11-wireless")
+SETTING_COMMANDS = {
+    "audio.output.volume": {
+        "cosmic": ("cosmic-settings", "sound"),
+        "gnome": ("gnome-control-center", "sound"),
+        "kde": ("kcmshell6", "kcm_pulseaudio"),
+        "cinnamon": ("cinnamon-settings", "sound", "--tab", "output"),
+        "xfce": ("pavucontrol",),
+        "mate": ("mate-volume-control",),
+        "lxqt": ("pavucontrol-qt",),
+    },
+    "display.brightness": {
+        "cosmic": ("cosmic-settings", "displays"),
+        "gnome": ("gnome-control-center", "display"),
+        "kde": ("kcmshell6", "kcm_kscreen"),
+        "cinnamon": ("cinnamon-settings", "display"),
+        "xfce": ("xfce4-display-settings",),
+        "mate": ("mate-display-properties",),
+        "lxqt": ("lxqt-config-brightness",),
+    },
+    "network.wifi": {
+        "cosmic": ("cosmic-settings", "wireless"),
+        "gnome": ("gnome-control-center", "wifi"),
+        "kde": ("kcmshell6", "kcm_networkmanagement"),
+        "cinnamon": ("cinnamon-settings", "network"),
+        "xfce": WIFI_EDITOR,
+        "mate": WIFI_EDITOR,
+        "lxqt": WIFI_EDITOR,
+    },
+    "input.keyboard": {
+        "cosmic": ("cosmic-settings", "keyboard"),
+        "gnome": ("gnome-control-center", "keyboard"),
+        "kde": ("kcmshell6", "kcm_keyboard"),
+        "cinnamon": ("cinnamon-settings", "keyboard"),
+        "xfce": ("xfce4-keyboard-settings",),
+        "mate": ("mate-keyboard-properties",),
+        "lxqt": ("lxqt-config-input",),
+    },
+    "power.battery": {
+        "cosmic": ("cosmic-settings", "power"),
+        "gnome": ("gnome-control-center", "power"),
+        "kde": ("kcmshell6", "kcm_powerdevilprofilesconfig"),
+        "cinnamon": ("cinnamon-settings", "power"),
+        "xfce": ("xfce4-power-manager-settings",),
+        "mate": ("mate-power-preferences",),
+        "lxqt": ("lxqt-config-powermanagement",),
+    },
+}
+DESKTOP_ALIASES = {
+    "plasma": "kde",
+    "plasmawayland": "kde",
+    "x-cinnamon": "cinnamon",
+    "cinnamon-wayland": "cinnamon",
+}
 RUNTIME_PREFIX = "semfind: runtime "
 DEVICES = {
     "CPUExecutionProvider": "CPU",
@@ -53,6 +108,20 @@ EMBEDDING_MODELS = (
     ("e5-large", "E5 Large"),
     (None, "Custom ONNX model"),
 )
+
+
+def setting_command(setting_id):
+    commands = SETTING_COMMANDS.get(setting_id)
+    if not commands:
+        return None
+    session = next((os.environ[key] for key in ("XDG_CURRENT_DESKTOP", "XDG_SESSION_DESKTOP", "DESKTOP_SESSION")
+                    if os.environ.get(key)), "")
+    for name in session.lower().split(":"):
+        desktop = DESKTOP_ALIASES.get(name, name)
+        if argv := commands.get(desktop):
+            executable = shutil.which(argv[0])
+            return [executable, *argv[1:]] if executable else None
+    return None
 
 
 def box(spacing=0, vertical=False, style=None):
@@ -534,6 +603,8 @@ class SearchWindow(Gtk.ApplicationWindow):
             action = button(_("Open"), lambda: self.open_file(path), "quiet", "document-open-symbolic")
         elif category == "application":
             action = button(_("Launch"), lambda: self.launch_app(hit["id"]), "quiet", "media-playback-start-symbolic")
+        elif category == "setting" and (argv := setting_command(hit["id"])):
+            action = button(_("Open"), lambda: self.open_setting(argv), "quiet", "preferences-system-symbolic")
         elif category == "command" and example:
             action = button(_("Copy"), lambda: self.copy_command(example), "quiet", "edit-copy-symbolic")
         if action:
@@ -547,6 +618,13 @@ class SearchWindow(Gtk.ApplicationWindow):
             Gio.AppInfo.launch_default_for_uri(uri, None)
         except GLib.Error as error:
             self.alert(_("Could not open the file"), error.message)
+
+    def open_setting(self, command):
+        def completed(output, error):
+            if output is None:
+                self.alert(_("Could not open the setting"), error)
+
+        run_process(command, completed)
 
     def launch_app(self, desktop_id):
         try:

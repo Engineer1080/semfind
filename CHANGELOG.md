@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.4
+
+- Add an Open button for supported setting results that opens the matching panel on COSMIC, GNOME, KDE Plasma 6, Cinnamon, Xfce, MATE, and LXQt when the appropriate tool is installed.
+- List all built-in model downloads and summarize recent text and photo retrieval benchmarks in the README.
+
 ## 0.4.3
 
 - Show ten localized, clickable search examples for files, applications, Linux commands, and settings in the GTK app. Each example fills the query, selects its category, and starts searching.
