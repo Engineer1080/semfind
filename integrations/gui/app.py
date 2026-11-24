@@ -144,15 +144,30 @@ class SearchWindow(Gtk.ApplicationWindow):
             self.add_action(action)
         application.set_accels_for_action("win.focus-search", ["<Control>k"])
         self.refresh_status()
+        run_process([self.cli, "--version"], self.update_version)
+
+    def update_version(self, output, _error):
+        if output and (parts := output.split()):
+            version = parts[-1]
+            self.brand_version.set_label(version)
+            self.brand_version.set_visible(True)
 
     def build(self):
         header = Gtk.HeaderBar()
         header.add_css_class("top-bar")
         brand = box(10)
-        mark = Gtk.Image.new_from_icon_name("system-search-symbolic")
+        source_icon = HERE.parents[1] / "packaging/deb/icons/semfind-64.png"
+        if source_icon.is_file():
+            mark = Gtk.Image.new_from_gicon(Gio.FileIcon.new(Gio.File.new_for_path(str(source_icon))))
+        else:
+            mark = Gtk.Image.new_from_icon_name(APP_ID)
+        mark.set_pixel_size(34)
         mark.add_css_class("brand-icon")
         brand.append(mark)
         brand.append(label("Semfind", "brand-word"))
+        self.brand_version = label("", "brand-version")
+        self.brand_version.set_visible(False)
+        brand.append(self.brand_version)
         header.pack_start(brand)
         header.set_title_widget(Gtk.Label())
         self.set_titlebar(header)

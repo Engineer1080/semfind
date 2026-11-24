@@ -16,23 +16,86 @@ from transformers import Florence2ForConditionalGeneration, Florence2Processor
 TASK = "<MORE_DETAILED_CAPTION>"
 MAX_IMAGE_BYTES = 16 * 1024 * 1024
 MAX_IMAGE_PIXELS = 40_000_000
+MAX_BATCH_SIZE = 8
 
 
-def caption(data, processor, model):
+def decode_image(data):
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(io.BytesIO(data), formats=("JPEG", "PNG", "WEBP")) as original:
-                image = ImageOps.exif_transpose(original).convert("RGB")
+                return ImageOps.exif_transpose(original).convert("RGB")
     except (OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning):
         return None
 
-    inputs = processor(text=TASK, images=image, return_tensors="pt").to(model.device)
+
+def generate(images, processor, model):
+    inputs = processor(text=[TASK] * len(images), images=images, return_tensors="pt").to(model.device)
     output = model.generate(**inputs, max_new_tokens=80, num_beams=1, do_sample=False)
-    generated = processor.batch_decode(output.cpu(), skip_special_tokens=False)[0]
-    result = processor.post_process_generation(generated, task=TASK, image_size=image.size)
-    text = " ".join(result[TASK].replace("\x00", " ").split())
-    return text[:512].strip() or None
+    pad_id = model.generation_config.pad_token_id
+    captions = []
+    for tokens, image in zip(output.cpu().tolist(), images, strict=True):
+        while tokens and tokens[-1] == pad_id:
+            tokens.pop()
+        generated = processor.decode(tokens, skip_special_tokens=False)
+        result = processor.post_process_generation(generated, task=TASK, image_size=image.size)
+        text = " ".join(result[TASK].replace("\x00", " ").split())
+        captions.append(text[:512].strip() or None)
+    return captions
+
+
+def generate_with_retry(images, processor, model):
+    try:
+        return generate(images, processor, model)
+    except torch.cuda.OutOfMemoryError:
+        if len(images) == 1:
+            raise
+    # Split only after the failed generation's tensors have been released.
+    torch.cuda.empty_cache()
+    middle = len(images) // 2
+    return (generate_with_retry(images[:middle], processor, model)
+            + generate_with_retry(images[middle:], processor, model))
+
+
+def captions(items, count, processor, model, backend):
+    results = [None] * count
+    pending = []
+    pixels = 0
+
+    def flush():
+        images = [image for _, image in pending]
+        texts = generate_with_retry(images, processor, model)
+        for (index, _), text in zip(pending, texts, strict=True):
+            results[index] = text
+        pending.clear()
+
+    for index, data in enumerate(items):
+        image = decode_image(data)
+        if image is None:
+            continue
+        size = image.width * image.height
+        if pending and (backend == "cpu" or pixels + size > MAX_IMAGE_PIXELS):
+            flush()
+            pixels = 0
+        pending.append((index, image))
+        pixels += size
+    if pending:
+        flush()
+    return results
+
+
+def read_images(stream, count):
+    for _ in range(count):
+        size = stream.read(4)
+        if len(size) != 4:
+            raise ValueError("incomplete image length")
+        length = int.from_bytes(size, "little")
+        if length > MAX_IMAGE_BYTES:
+            raise ValueError("image exceeds the 16 MiB input limit")
+        data = stream.read(length)
+        if len(data) != length:
+            raise ValueError("incomplete image")
+        yield data
 
 
 def select_backend(requested):
@@ -59,17 +122,13 @@ def main():
         ).to("cpu" if backend == "cpu" else "cuda").eval()
     print(json.dumps(backend))
     with torch.inference_mode():
-        while size := sys.stdin.buffer.read(4):
-            if len(size) != 4:
-                raise ValueError("incomplete image length")
-            length = int.from_bytes(size, "little")
-            if length > MAX_IMAGE_BYTES:
-                raise ValueError("image exceeds the 16 MiB input limit")
-            data = sys.stdin.buffer.read(length)
-            if len(data) != length:
-                raise ValueError("incomplete image")
+        stream = sys.stdin.buffer
+        while header := stream.read(1):
+            count = header[0]
+            if not 1 <= count <= MAX_BATCH_SIZE:
+                raise ValueError("invalid image batch size")
             with redirect_stdout(sys.stderr):
-                result = caption(data, processor, model)
+                result = captions(read_images(stream, count), count, processor, model, backend)
             print(json.dumps(result))
 
 

@@ -1069,6 +1069,126 @@ struct ImageScan<'a> {
     only: bool,
 }
 
+struct PendingCaption {
+    key: String,
+    title: String,
+    extension: String,
+    digest: [u8; 32],
+    old_id: Option<i64>,
+    bytes: Vec<u8>,
+}
+
+fn file_source<'a>(root: &'a str, key: &'a str, title: &'a str, extension: &'a str) -> Source<'a> {
+    Source {
+        key,
+        category: "file",
+        title,
+        root: Some(root),
+        extension: Some(extension),
+        desktop: None,
+        setting_group: None,
+        distro: None,
+        example: None,
+    }
+}
+
+fn write_file(
+    tx: &Transaction<'_>,
+    source: Source<'_>,
+    kind: FileKind,
+    text: Option<&str>,
+    digest: &[u8],
+    model: &mut impl Embedder,
+) -> Result<i64> {
+    let pdf = source.extension == Some("pdf");
+    write_source(
+        tx,
+        source,
+        text.map(|text| {
+            files::file_passages(text, pdf).map(|mut passage| {
+                if kind == FileKind::Image {
+                    passage.location = None;
+                }
+                passage
+            })
+        }),
+        digest,
+        model,
+    )
+}
+
+fn flush_captions(
+    tx: &Transaction<'_>,
+    root: &str,
+    pending: &mut Vec<PendingCaption>,
+    captions: &mut Option<CaptionScan<'_>>,
+    model: &mut impl Embedder,
+    report: &mut IndexReport,
+) -> Result<()> {
+    if pending.is_empty() {
+        return Ok(());
+    }
+    let scan = captions
+        .as_mut()
+        .expect("pending captions require a captioner");
+    let inputs: Vec<_> = pending.iter().map(|image| image.bytes.as_slice()).collect();
+    let result = scan.captioner.captions(&inputs).and_then(|texts| {
+        ensure!(
+            texts.len() == pending.len(),
+            "unexpected number of captions"
+        );
+        Ok(texts)
+    });
+    let texts = match result {
+        Ok(texts) => Some(texts),
+        Err(error) if scan.required => {
+            return Err(error)
+                .with_context(|| format!("caption images starting at {}", pending[0].key));
+        }
+        Err(error) => {
+            warn(
+                report,
+                Path::new(&pending[0].key),
+                &error.context("Florence-2 unavailable. Continuing without new captions"),
+            );
+            *captions = None;
+            None
+        }
+    };
+    for (index, image) in pending.drain(..).enumerate() {
+        let source = file_source(root, &image.key, &image.title, &image.extension);
+        let id = if let Some(texts) = &texts {
+            let text = texts[index]
+                .as_deref()
+                .filter(|text| !text.trim().is_empty());
+            if text.is_none() {
+                warn(
+                    report,
+                    Path::new(&image.key),
+                    &anyhow::anyhow!("image could not be captioned; indexed filename"),
+                );
+            }
+            report.written += 1;
+            write_file(tx, source, FileKind::Image, text, &image.digest, model)?
+        } else if let Some(id) = image.old_id {
+            report.unchanged += 1;
+            id
+        } else {
+            report.written += 1;
+            write_file(
+                tx,
+                source,
+                FileKind::Image,
+                None,
+                &Sha256::digest(b"file-name-v1"),
+                model,
+            )?
+        };
+        tx.execute("INSERT INTO seen VALUES (?1)", [id])?;
+    }
+    Ok(())
+}
+
 fn synchronize_files(
     tx: &Transaction<'_>,
     root: &Path,
@@ -1102,6 +1222,7 @@ fn synchronize_files(
                         }
                     }))
         });
+    let mut pending = Vec::new();
     for entry in walker {
         let entry = entry.context("scan directory (changes rolled back)")?;
         if !entry.file_type().is_file() {
@@ -1154,7 +1275,7 @@ fn synchronize_files(
         } else {
             None
         };
-        let mut digest = match (&bytes, &caption_scan) {
+        let digest = match (&bytes, &caption_scan) {
             (Some(bytes), _) if direct => Sha256::new()
                 .chain_update(b"image-vector-v1\0")
                 .chain_update(bytes)
@@ -1173,17 +1294,7 @@ fn synchronize_files(
         };
         // A filename-only scan must preserve previously indexed captions.
         let preserve_caption = kind == FileKind::Image && !direct && caption_scan.is_none();
-        let source = Source {
-            key,
-            category: "file",
-            title,
-            root: Some(root_name),
-            extension: Some(&extension),
-            desktop: None,
-            setting_group: None,
-            distro: None,
-            example: None,
-        };
+        let source = file_source(root_name, key, title, &extension);
         let stored = source_state(tx, key)?;
         let id = if let Some((id, _)) = stored
             .as_ref()
@@ -1216,38 +1327,28 @@ fn synchronize_files(
             id
         } else {
             let text = match (bytes, caption_scan) {
-                (Some(bytes), Some(scan)) => match scan.captioner.caption(&bytes) {
-                    Ok(caption) => {
-                        let caption = caption.filter(|text| !text.trim().is_empty());
-                        if caption.is_none() {
-                            warn(
-                                report,
-                                path,
-                                &anyhow::anyhow!("image could not be captioned; indexed filename"),
-                            );
-                        }
-                        caption
-                    }
-                    Err(error) if scan.required => {
-                        return Err(error).with_context(|| format!("caption {}", path.display()));
-                    }
-                    Err(error) => {
-                        warn(
+                (Some(bytes), Some(scan)) => {
+                    let limit = scan.captioner.batch_size().max(1);
+                    pending.push(PendingCaption {
+                        key: key.into(),
+                        title: title.into(),
+                        extension,
+                        digest: digest.into(),
+                        old_id: stored.map(|(id, _)| id),
+                        bytes,
+                    });
+                    if pending.len() >= limit {
+                        flush_captions(
+                            tx,
+                            root_name,
+                            &mut pending,
+                            &mut images.captions,
+                            model,
                             report,
-                            path,
-                            &error
-                                .context("Florence-2 unavailable. Continuing without new captions"),
-                        );
-                        images.captions = None;
-                        if let Some((id, _)) = stored {
-                            report.unchanged += 1;
-                            tx.execute("INSERT INTO seen VALUES (?1)", [id])?;
-                            continue;
-                        }
-                        digest = Sha256::digest(b"file-name-v1");
-                        None
+                        )?;
                     }
-                },
+                    continue;
+                }
                 (Some(bytes), None) => match files::extract(&extension, bytes) {
                     Ok(text) => Some(text),
                     Err(error) => {
@@ -1257,25 +1358,20 @@ fn synchronize_files(
                 },
                 (None, _) => None,
             };
-            let id = write_source(
-                tx,
-                source,
-                text.as_deref().map(|text| {
-                    files::file_passages(text, extension == "pdf").map(|mut passage| {
-                        if kind == FileKind::Image {
-                            passage.location = None;
-                        }
-                        passage
-                    })
-                }),
-                &digest,
-                model,
-            )?;
+            let id = write_file(tx, source, kind, text.as_deref(), &digest, model)?;
             report.written += 1;
             id
         };
         tx.execute("INSERT INTO seen VALUES (?1)", [id])?;
     }
+    flush_captions(
+        tx,
+        root_name,
+        &mut pending,
+        &mut images.captions,
+        model,
+        report,
+    )?;
     if !images.only {
         report.removed += tx.execute(
             "DELETE FROM sources WHERE root = ?1 AND id NOT IN (SELECT id FROM seen)",

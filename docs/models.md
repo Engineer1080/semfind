@@ -113,6 +113,8 @@ The built-in 0.68 similarity cutoff was calibrated for text. Direct image matche
 
 `--setup-runtime` reuses a compatible local PyTorch environment or sets up a CPU runtime in Semfind's user data directory. It requires Python with venv support. The desktop app can run this setup when you choose a vision model.
 
+On a GPU, Florence-2 captions new and changed images in batches of up to eight. Large images can reduce the batch size. A GPU memory shortage splits a batch into smaller groups. The CPU processes one image at a time, including after a GPU failure.
+
 Both Florence-2 and EmbeddingGemma 2 can use PyTorch CUDA or ROCm. Semfind discovers `runtime/florence-cuda` and `runtime/florence-rocm` under its data directory and can fall back to CPU. `--device cpu` forces CPU inference. For EmbeddingGemma 2, `--device migraphx` selects PyTorch ROCm, and `--runtime-info` reports the actual provider. The [ONNX GPU setup guide](gpu.md) applies to the ONNX models.
 
 For NVIDIA with a CUDA 13-capable driver, create a dedicated PyTorch environment.

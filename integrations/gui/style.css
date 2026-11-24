@@ -14,14 +14,16 @@
 .semfind .brand-icon {
   min-width: 34px;
   min-height: 34px;
-  color: #9ef5d5;
-  background: #20473e;
-  border-radius: 10px;
 }
 .semfind .brand-word {
   font-size: 20px;
   font-weight: 750;
   letter-spacing: -0.4px;
+}
+.semfind .brand-version {
+  color: #a3b0c2;
+  font-size: 12px;
+  font-weight: 600;
 }
 .semfind .sidebar {
   background: #141d2a;

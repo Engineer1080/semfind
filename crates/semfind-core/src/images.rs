@@ -1,5 +1,5 @@
 use crate::model::PythonWorker;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
@@ -8,6 +8,8 @@ use std::{
     io::{self, Write},
     path::{Path, PathBuf},
 };
+
+const GPU_BATCH_SIZE: usize = 8;
 
 const FILES: &[&str] = &[
     "added_tokens.json",
@@ -30,6 +32,16 @@ pub trait ImageCaptioner {
 
     /// Describe one encoded image, or return `None` when it cannot be decoded or described.
     fn caption(&mut self, image: &[u8]) -> Result<Option<String>>;
+
+    /// Preferred number of images per request.
+    fn batch_size(&self) -> usize {
+        1
+    }
+
+    /// Return one result per image, in input order.
+    fn captions(&mut self, images: &[&[u8]]) -> Result<Vec<Option<String>>> {
+        images.iter().map(|image| self.caption(image)).collect()
+    }
 }
 
 /// Local Florence-2 caption generation. The worker is started on the first image.
@@ -86,12 +98,20 @@ impl CaptionWorker {
         })
     }
 
-    fn caption(&mut self, image: &[u8]) -> Result<Option<String>> {
+    fn captions(&mut self, images: &[&[u8]]) -> Result<Vec<Option<String>>> {
         let input = &mut self.process.input;
-        input.write_all(&u32::try_from(image.len())?.to_le_bytes())?;
-        input.write_all(image)?;
+        input.write_all(&[u8::try_from(images.len())?])?;
+        for image in images {
+            input.write_all(&u32::try_from(image.len())?.to_le_bytes())?;
+            input.write_all(image)?;
+        }
         input.flush()?;
-        self.process.receive()
+        let captions: Vec<Option<String>> = self.process.receive()?;
+        ensure!(
+            captions.len() == images.len(),
+            "unexpected number of captions"
+        );
+        Ok(captions)
     }
 }
 
@@ -202,11 +222,32 @@ impl ImageCaptioner for FlorenceCaptioner<'_> {
     }
 
     fn caption(&mut self, image: &[u8]) -> Result<Option<String>> {
+        Ok(self.captions(&[image])?.pop().expect("one caption"))
+    }
+
+    fn batch_size(&self) -> usize {
+        if self.allow_gpu
+            && self
+                .worker
+                .as_ref()
+                .is_none_or(|worker| worker.backend != Backend::Cpu)
+        {
+            GPU_BATCH_SIZE
+        } else {
+            1
+        }
+    }
+
+    fn captions(&mut self, images: &[&[u8]]) -> Result<Vec<Option<String>>> {
+        if images.is_empty() {
+            return Ok(Vec::new());
+        }
+        ensure!(images.len() <= GPU_BATCH_SIZE, "invalid image batch size");
         if self.worker.is_none() {
             self.worker = Some(self.start_worker()?);
         }
         let worker = self.worker.as_mut().expect("caption worker started");
-        let result = worker.caption(image);
+        let result = worker.captions(images);
         if result.is_ok() || worker.backend == Backend::Cpu {
             return result;
         }
@@ -220,7 +261,7 @@ impl ImageCaptioner for FlorenceCaptioner<'_> {
         drop(process);
         self.allow_gpu = false;
         let worker = self.start_cpu(&python)?;
-        self.worker.insert(worker).caption(image)
+        self.worker.insert(worker).captions(images)
     }
 }
 
@@ -246,12 +287,17 @@ mod tests {
         fs::create_dir_all(interpreter.parent().unwrap())?;
         fs::write(
             &interpreter,
-            r#"#!/bin/sh
-printf '"%s"\n' "$6"
-while [ "$(dd bs=7 count=1 iflag=fullblock 2>/dev/null | wc -c)" -eq 7 ]; do
-    if [ "$6" = cuda ]; then exit 1; fi
-    printf '"from the CPU"\n'
-done
+            r#"#!/usr/bin/python3
+import json
+import sys
+device = sys.argv[6]
+print(json.dumps(device), flush=True)
+stream = sys.stdin.buffer
+while header := stream.read(1):
+    images = [stream.read(int.from_bytes(stream.read(4), "little")) for _ in range(header[0])]
+    if device == "cuda":
+        sys.exit(1)
+    print(json.dumps([image.decode() + " from the CPU" for image in images]), flush=True)
 "#,
         )?;
         fs::set_permissions(&interpreter, fs::Permissions::from_mode(0o700))?;
@@ -259,9 +305,20 @@ done
         let mut captioner =
             FlorenceCaptioner::with_runtime(&configured_python, &model, Some(&runtime), true)?;
         assert_eq!(captioner.backend(), None);
-        assert_eq!(captioner.caption(b"one")?.as_deref(), Some("from the CPU"));
+        assert_eq!(captioner.batch_size(), 8);
+        assert_eq!(
+            captioner.captions(&[b"one", b"two"])?,
+            vec![
+                Some("one from the CPU".into()),
+                Some("two from the CPU".into())
+            ]
+        );
         assert_eq!(captioner.backend(), Some("CPU"));
-        assert_eq!(captioner.caption(b"two")?.as_deref(), Some("from the CPU"));
+        assert_eq!(captioner.batch_size(), 1);
+        assert_eq!(
+            captioner.caption(b"three")?.as_deref(),
+            Some("three from the CPU")
+        );
         Ok(())
     }
 }

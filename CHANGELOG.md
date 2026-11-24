@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1
+
+- Show the Semfind logo and the active CLI version in the desktop app header.
+- Generate Florence-2 captions on compatible GPUs in batches of up to eight images. Retry smaller batches when GPU memory is tight and fall back to single-image CPU processing if necessary.
+
 ## 0.4.0
 
 - Keep Granite 97M as the default text encoder. Add **EmbeddingGemma 300M FP32 and INT8**, **GTE Multilingual Base FP32**, and **Qwen3 Embedding 0.6B INT8** as verified ONNX downloads and choices in the CLI and desktop app.

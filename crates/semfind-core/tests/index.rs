@@ -19,11 +19,21 @@ struct FixtureModel {
 struct FixtureCaptioner {
     revision: &'static str,
     calls: usize,
+    batches: Vec<usize>,
 }
 
 impl ImageCaptioner for FixtureCaptioner {
     fn identity(&self) -> &str {
         self.revision
+    }
+
+    fn batch_size(&self) -> usize {
+        2
+    }
+
+    fn captions(&mut self, images: &[&[u8]]) -> Result<Vec<Option<String>>> {
+        self.batches.push(images.len());
+        images.iter().map(|image| self.caption(image)).collect()
     }
 
     fn caption(&mut self, image: &[u8]) -> Result<Option<String>> {
@@ -141,6 +151,7 @@ fn switching_models_keeps_saved_content_and_rolls_back_partial_rebuilds() -> Res
     let mut captioner = FixtureCaptioner {
         revision: "caption-v1",
         calls: 0,
+        batches: Vec::new(),
     };
     index.synchronize_with_image_captions(&root, &options, None, &mut original, &mut captioner)?;
     let before = index.status()?;
@@ -229,6 +240,7 @@ fn direct_images_share_search_and_are_rebuilt_from_the_source_when_switching() -
     let mut captions = FixtureCaptioner {
         revision: "caption-v1",
         calls: 0,
+        batches: Vec::new(),
     };
     index.synchronize_with_image_captions(
         &root,
@@ -334,10 +346,12 @@ fn image_captions_share_document_search_and_refresh_incrementally() -> Result<()
     let mut captioner = FixtureCaptioner {
         revision: "fixture-caption-v1",
         calls: 0,
+        batches: Vec::new(),
     };
     let report =
         index.synchronize_with_image_captions(&root, &scan, None, &mut model, &mut captioner)?;
     assert_eq!((report.written, report.skipped, captioner.calls), (3, 1, 3));
+    assert_eq!(captioner.batches, [2, 1]);
     let hits = index.search("cold storage", &scoped, &mut model)?;
     assert_eq!(hits.len(), 2);
     assert!(hits.iter().any(|hit| hit.path.as_ref() == Some(&document)));
@@ -368,6 +382,7 @@ fn image_captions_share_document_search_and_refresh_incrementally() -> Result<()
         0
     );
     assert_eq!(captioner.calls, 3);
+    assert_eq!(captioner.batches, [2, 1]);
 
     fs::write(&picture, "broken-worker")?;
     assert!(
