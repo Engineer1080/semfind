@@ -1,6 +1,6 @@
 # Semfind desktop app
 
-Semfind has an optional GTK window for searching the same local index as the CLI. Select a result category to narrow the search. File results show paths and excerpts, plus page or line numbers when the index has them. Open files and applications with their desktop handlers. Copy command examples to the clipboard.
+Semfind has an optional GTK window for searching the same local index as the CLI. Select a result category to narrow the search. File results show paths and excerpts, plus page or line numbers when the index has them. Open files and applications with their desktop handlers. Copy command examples to the clipboard. Once the index is ready, the welcome screen offers ten localized example searches. Selecting one fills the search field, chooses its category, and starts the search.
 
 ## Run from source
 

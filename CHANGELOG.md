@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.3
+
+- Show ten localized, clickable search examples for files, applications, Linux commands, and settings in the GTK app. Each example fills the query, selects its category, and starts searching.
+
 ## 0.4.2
 
 - Add Simplified Chinese, Japanese, Dutch, Polish, and Turkish to terminal help, setup hints, status messages, and the built-in command and COSMIC settings catalogs.

@@ -390,9 +390,29 @@ class SearchWindow(Gtk.ApplicationWindow):
             examples = (
                 (_("How do I show free disk space?"), "command"),
                 (_("An app for editing screenshots"), "application"),
+                (_("Where are my notes about backups?"), "file"),
+                (_("How do I make my screen brighter?"), "setting"),
+                (_("How much RAM is available?"), "command"),
+                (_("Find the PDF about network setup"), "file"),
+                (_("An app for video calls"), "application"),
+                (_("How do I install a new package?"), "command"),
+                (_("Photos of a cat on a sofa"), "file"),
+                (_("Connect to a Wi-Fi network"), "setting"),
+            )
+            suggestions = Gtk.FlowBox(
+                selection_mode=Gtk.SelectionMode.NONE,
+                homogeneous=True,
+                max_children_per_line=2,
+                column_spacing=8,
+                row_spacing=8,
             )
             for query, category in examples:
-                welcome.append(button(query, lambda q=query, c=category: self.example(q, c), "example"))
+                suggestion = button(query, lambda q=query, c=category: self.example(q, c), "example")
+                text = suggestion.get_child()
+                text.set_wrap(True)
+                text.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+                suggestions.append(suggestion)
+            welcome.append(suggestions)
         self.content.append(welcome)
 
     def example(self, query, category):
