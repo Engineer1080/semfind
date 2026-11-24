@@ -150,6 +150,25 @@ Homepage: https://github.com/Engineer1080/semfind
 Description: Desktop interface for Semfind local search
  Find files, applications, and Linux commands in the Semfind index.
 
+Package: semfind-gui
+Architecture: all
+Version: 0.4.2-1
+Priority: optional
+Section: utils
+Maintainer: Semfind contributors <Engineer1080@users.noreply.github.com>
+Depends: semfind (>= 0.4.2-1), python3, python3-gi, gir1.2-gtk-4.0 (>= 4.10)
+Breaks: semfind (<< 0.3.2-1)
+Replaces: semfind (<< 0.3.2-1)
+Filename: pool/main/s/semfind/semfind-gui_0.4.2-1_all.deb
+Size: 55208
+MD5sum: 675cd2f05858d6a0d25a88ea025b8d2a
+SHA1: 90f974faf847caae9466dba747205a1330f06027
+SHA256: 2fb230ef1d7af0ae81b202e56a40e91d2a9771999f9d19bfa7382f224e450d2f
+SHA512: 1c32ae84be1e1c243068d6d61a6031cc82118d7688aece2a9e561d34f36112cf5ba4c9a33dc7200002a378fa555143e0a23c804e469d51e6c15ea5fb79353a7a
+Homepage: https://github.com/Engineer1080/semfind
+Description: Desktop interface for Semfind local search
+ Find files, applications, and Linux commands in the Semfind index.
+
 Package: semfind
 Architecture: amd64
 Version: 0.3.3-1
@@ -297,6 +316,25 @@ MD5sum: bf7cfbedb61fbf03814b0fa65eca6371
 SHA1: fe303f3a8c760e7438e0a76d272f97b54efc57eb
 SHA256: 36cf3a1b7bf5624fea0f55909ef3d4d0c29bded03d436f61447d2067781ee6ae
 SHA512: a82b69bb556b62c66233b643b7fa0572eb3f9d0fbbbb53c6c0b41d5433247acf7fb41b1b44e4589c1b7e02e4791f3221dd7a44b26d2ac0a40844a5d08712ce1f
+Homepage: https://github.com/Engineer1080/semfind
+Description: Offline semantic search for Linux
+ Find files by content, installed applications by purpose, and Linux
+ commands by task. Search from a terminal or use JSON for automation.
+
+Package: semfind
+Architecture: amd64
+Version: 0.4.2-1
+Priority: optional
+Section: utils
+Maintainer: Semfind contributors <Engineer1080@users.noreply.github.com>
+Depends: libc6 (>= 2.39), libgcc-s1 (>= 4.2), python3.12, libstdc++6, ca-certificates
+Recommends: python3.12-venv, poppler-utils, man-db
+Filename: pool/main/s/semfind/semfind_0.4.2-1_amd64.deb
+Size: 43506648
+MD5sum: 407be1c17b6413c357ebfe957e83f341
+SHA1: b5e58eb51c8fc957a4dd2b81e37c526df3d56bf6
+SHA256: e7823712f53062a831cd70161f0b2a80b3a81ec9600ea68d29c50f98a2ee7128
+SHA512: cde159c642ffce74b5578cf41c59a7ad82265b00d44f0f10208451d9759e0ef31f119a13220d3f3ed446130c8cd4d2542873621c9a5eb0e22ab53443aefc3944
 Homepage: https://github.com/Engineer1080/semfind
 Description: Offline semantic search for Linux
  Find files by content, installed applications by purpose, and Linux
