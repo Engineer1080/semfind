@@ -417,6 +417,7 @@ enum KindFilter {
     Image,
     #[value(alias = "videos")]
     Video,
+    Audio,
 }
 
 impl From<KindFilter> for FileKind {
@@ -425,6 +426,7 @@ impl From<KindFilter> for FileKind {
             KindFilter::Text => Self::Text,
             KindFilter::Image => Self::Image,
             KindFilter::Video => Self::Video,
+            KindFilter::Audio => Self::Audio,
         }
     }
 }

@@ -56,7 +56,7 @@ semfind --index-dir ./target/semfind-demo-index index ./examples/documents
 semfind --index-dir ./target/semfind-demo-index "Wie lange sollen personenbezogene Daten gespeichert werden?" --category file --limit 1
 ```
 
-For everyday use, `semfind init` indexes supported files under your home directory, registered desktop applications, local command manuals, and the built-in catalogs. The first scan can take a while. In an interactive terminal, Semfind reports progress as it scans.
+For everyday use, `semfind init` indexes supported files under your home directory, registered desktop applications, installed settings pages, local command manuals, and the built-in catalogs. The first scan can take a while. In an interactive terminal, Semfind reports progress as it scans.
 
 ```bash
 semfind init
@@ -73,7 +73,7 @@ Use `semfind index ~/Documents` to scan only a chosen folder. The [search guide]
 
 The optional desktop app lets you search by category, preview matching passages, open files and apps, and copy Linux command examples. Use **Manage index** to add folders or switch models. After indexing, the start page offers ten clickable examples. The GUI and CLI share the local index and support the same twelve interface languages. [Language selection](docs/search.md#languages)
 
-The GUI can open matching settings for **sound, display, Wi-Fi, keyboard, and power** on **COSMIC, GNOME, KDE Plasma 6, Cinnamon, Xfce, MATE, and LXQt**. The **Open** button appears when the appropriate settings tool is installed. On Xfce, MATE, and LXQt, Wi-Fi results open the NetworkManager connection editor with wireless profiles highlighted. [Desktop app guide](integrations/gui/README.md)
+Semfind discovers installed settings pages on **COSMIC, GNOME, KDE Plasma 6, Cinnamon, Xfce, MATE, and LXQt**. It searches their names, descriptions, and translated keywords when available. The GUI can open discovered pages and selected built-in settings. Run `semfind index` from your desktop session to refresh the settings after installing or removing desktop components. [Desktop app guide](integrations/gui/README.md)
 
 ### Launcher adapters
 

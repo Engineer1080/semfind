@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import sys
 import time
@@ -19,9 +20,15 @@ from gi.repository import Gdk, Gio, GLib, Gtk, Pango
 
 APP_ID = "io.github.engineer1080.semfind"
 HERE = Path(__file__).resolve().parent
+MEDIA_SCOPES = {
+    "image": (_("Images"), "image-x-generic-symbolic"),
+    "video": (_("Videos"), "video-x-generic-symbolic"),
+    "audio": (_("Audio"), "audio-x-generic-symbolic"),
+}
 CATEGORIES = {
     "": (_("All results"), "system-search-symbolic"),
     "file": (_("Files"), "text-x-generic-symbolic"),
+    **MEDIA_SCOPES,
     "application": (_("Applications"), "view-app-grid-symbolic"),
     "command": (_("Commands"), "utilities-terminal-symbolic"),
     "setting": (_("Settings"), "preferences-system-symbolic"),
@@ -49,6 +56,12 @@ SETTING_COMMANDS = {
         "xfce": ("xfce4-display-settings",),
         "mate": ("mate-display-properties",),
         "lxqt": ("lxqt-config-brightness",),
+    },
+    "display.mode": {
+        "cosmic": ("cosmic-settings", "displays"),
+    },
+    "system.language": {
+        "cosmic": ("cosmic-settings", "region-language"),
     },
     "network.wifi": {
         "cosmic": ("cosmic-settings", "wireless"),
@@ -81,8 +94,10 @@ SETTING_COMMANDS = {
 DESKTOP_ALIASES = {
     "plasma": "kde",
     "plasmawayland": "kde",
+    "gnome-classic": "gnome",
     "x-cinnamon": "cinnamon",
     "cinnamon-wayland": "cinnamon",
+    "xfce4": "xfce",
 }
 RUNTIME_PREFIX = "semfind: runtime "
 DEVICES = {
@@ -110,15 +125,23 @@ EMBEDDING_MODELS = (
 )
 
 
-def setting_command(setting_id):
+def setting_launcher(setting_id):
     commands = SETTING_COMMANDS.get(setting_id)
-    if not commands:
-        return None
     session = next((os.environ[key] for key in ("XDG_CURRENT_DESKTOP", "XDG_SESSION_DESKTOP", "DESKTOP_SESSION")
                     if os.environ.get(key)), "")
     for name in session.lower().split(":"):
         desktop = DESKTOP_ALIASES.get(name, name)
-        if argv := commands.get(desktop):
+        prefix = f"setting.local.{desktop}."
+        if setting_id.startswith(prefix):
+            target = setting_id.removeprefix(prefix)
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", target):
+                return None
+            if target.endswith(".desktop"):
+                return Gio.DesktopAppInfo.new(target)
+            elif desktop == "kde" and (executable := shutil.which("kcmshell6")):
+                return [executable, "--", target]
+            return None
+        if commands and (argv := commands.get(desktop)):
             executable = shutil.which(argv[0])
             return [executable, *argv[1:]] if executable else None
     return None
@@ -203,7 +226,7 @@ class SearchWindow(Gtk.ApplicationWindow):
         self.category = ""
         self.search_request = 0
         self.search_process = None
-        self.active_query = ""
+        self.active_query = None
         self.job = None
         self.tabs = {}
         self.add_css_class("semfind")
@@ -246,7 +269,10 @@ class SearchWindow(Gtk.ApplicationWindow):
         body = box()
         self.set_child(body)
         self.sidebar = box(6, vertical=True, style="sidebar")
-        body.append(self.sidebar)
+        nav_scroll = Gtk.ScrolledWindow(propagate_natural_width=True)
+        nav_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        nav_scroll.set_child(self.sidebar)
+        body.append(nav_scroll)
         self.sidebar.append(label(_("SEARCH IN"), "section-label"))
         previous = None
         for category, (name, icon) in CATEGORIES.items():
@@ -325,7 +351,7 @@ class SearchWindow(Gtk.ApplicationWindow):
     def change_category(self, tab, category):
         if tab.get_active():
             self.category = category
-            if self.active_query and not self.job:
+            if not self.job and (self.active_query is not None or category in MEDIA_SCOPES):
                 self.search()
 
     def feedback(self, text="", error=False):
@@ -390,7 +416,7 @@ class SearchWindow(Gtk.ApplicationWindow):
         if not caption_name:
             self.last_caption_backend = None
         self.update_device_labels()
-        if not self.active_query:
+        if self.active_query is None:
             self.show_welcome()
         return True
 
@@ -487,7 +513,7 @@ class SearchWindow(Gtk.ApplicationWindow):
     def example(self, query, category):
         self.entry.set_text(query)
         tab = self.tabs[category]
-        needs_search = tab.get_active() or not self.active_query
+        needs_search = tab.get_active() or self.active_query is None
         tab.set_active(True)
         if needs_search:
             self.search()
@@ -502,16 +528,19 @@ class SearchWindow(Gtk.ApplicationWindow):
         if self.job:
             return
         query = self.entry.get_text().strip()
+        media_kind = self.category if self.category in MEDIA_SCOPES else None
         self.cancel_search()
-        self.active_query = query
-        if not query:
+        self.active_query = query if query or media_kind else None
+        if self.active_query is None:
             self.feedback()
             self.show_welcome()
             return
 
         arguments = ["search", "--json", "--limit", "30", "--no-gpu-hint"]
         arguments.extend(self.runtime_options())
-        if self.category:
+        if media_kind:
+            arguments += ["--kind", media_kind]
+        elif self.category:
             arguments += ["--category", self.category]
         request = self.search_request
         self.feedback(_("Searching your local index…"))
@@ -536,7 +565,9 @@ class SearchWindow(Gtk.ApplicationWindow):
             self.feedback()
             self.render_results(hits)
 
-        self.search_process = self.run_cli([*arguments, "--", query], completed)
+        if query:
+            arguments.extend(("--", query))
+        self.search_process = self.run_cli(arguments, completed)
 
     def show_error_details(self, error):
         self.content.append(button(_("Show error details"), lambda: self.alert(
@@ -558,7 +589,8 @@ class SearchWindow(Gtk.ApplicationWindow):
     def result_card(self, hit):
         category = hit["category"]
         card = box(12, style="result")
-        icon_name = CATEGORIES.get(category, CATEGORIES[""])[1]
+        scope = self.category if category == "file" and self.category in MEDIA_SCOPES else category
+        icon_name = CATEGORIES.get(scope, CATEGORIES[""])[1]
         badge = Gtk.Image.new_from_icon_name(icon_name)
         badge.add_css_class("result-icon")
         badge.add_css_class(category)
@@ -603,8 +635,8 @@ class SearchWindow(Gtk.ApplicationWindow):
             action = button(_("Open"), lambda: self.open_file(path), "quiet", "document-open-symbolic")
         elif category == "application":
             action = button(_("Launch"), lambda: self.launch_app(hit["id"]), "quiet", "media-playback-start-symbolic")
-        elif category == "setting" and (argv := setting_command(hit["id"])):
-            action = button(_("Open"), lambda: self.open_setting(argv), "quiet", "preferences-system-symbolic")
+        elif category == "setting" and (launcher := setting_launcher(hit["id"])):
+            action = button(_("Open"), lambda: self.open_setting(launcher), "quiet", "preferences-system-symbolic")
         elif category == "command" and example:
             action = button(_("Copy"), lambda: self.copy_command(example), "quiet", "edit-copy-symbolic")
         if action:
@@ -619,12 +651,20 @@ class SearchWindow(Gtk.ApplicationWindow):
         except GLib.Error as error:
             self.alert(_("Could not open the file"), error.message)
 
-    def open_setting(self, command):
+    def open_setting(self, launcher):
+        if isinstance(launcher, Gio.DesktopAppInfo):
+            try:
+                if not launcher.launch([], None):
+                    self.alert(_("Could not open the setting"), launcher.get_name())
+            except GLib.Error as error:
+                self.alert(_("Could not open the setting"), error.message)
+            return
+
         def completed(output, error):
             if output is None:
                 self.alert(_("Could not open the setting"), error)
 
-        run_process(command, completed)
+        run_process(launcher, completed)
 
     def launch_app(self, desktop_id):
         try:
@@ -909,7 +949,7 @@ class SearchWindow(Gtk.ApplicationWindow):
 
         def refreshed(updated):
             finish()
-            if updated and self.active_query:
+            if updated and (self.active_query is not None or self.category in MEDIA_SCOPES):
                 self.search()
 
         def complete(output, stderr):

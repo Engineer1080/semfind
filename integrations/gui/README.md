@@ -1,6 +1,10 @@
 # Semfind desktop app
 
-Semfind has an optional GTK window for searching the same local index as the CLI. Select a result category to narrow the search. File results show paths and excerpts, plus page or line numbers when the index has them. Open files and applications with their desktop handlers. Copy command examples to the clipboard. Use **Open** on a supported setting to open its page in the current desktop environment. Semfind can open sound, display, Wi-Fi, keyboard, and power settings on COSMIC, GNOME, KDE Plasma 6, Cinnamon, Xfce, MATE, and LXQt.
+Semfind has an optional GTK window for searching the same local index as the CLI. Select a result category to narrow the search. File results show paths and excerpts, plus page or line numbers when the index has them. Open files and applications with their desktop handlers. Copy command examples to the clipboard. Use **Open** on an installed setting to open its page. Semfind discovers settings in the current COSMIC, GNOME, KDE Plasma 6, Cinnamon, Xfce, MATE, or LXQt session when you run `semfind init` or `semfind index` without a folder.
+
+On COSMIC, use **Open** on a resolution or refresh rate result to go to **Displays**, or on a system language result to go to **Region & Language**.
+
+Use **Images**, **Videos**, or **Audio** to limit the search to that media type. Select a media area with an empty search field to browse indexed files of that type. Image search supports captions or direct image embeddings when configured. Video and audio search match filenames and paths.
 
 Semfind shows **Open** when the matching tool is installed. On Xfce, MATE, and LXQt, Wi-Fi opens the NetworkManager connection editor with wireless profiles highlighted. Xfce uses Pavucontrol for sound, and LXQt uses Pavucontrol-Qt.
 

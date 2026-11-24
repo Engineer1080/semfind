@@ -611,9 +611,9 @@ fn persistent_hybrid_search_filters_and_prioritizes_exact_literals() -> Result<(
     };
     let first = index.synchronize(Some(&root), &options, &mut model)?;
     let commands = usize::try_from(index.status()?.commands)?;
-    assert_eq!(first.written, 9 + commands);
+    assert_eq!(first.written, 11 + commands);
     let rescan = index.synchronize(Some(&root), &IndexOptions::default(), &mut model)?;
-    assert_eq!((rescan.written, rescan.unchanged), (0, 9 + commands));
+    assert_eq!((rescan.written, rescan.unchanged), (0, 11 + commands));
     drop(index);
 
     let index = Index::open(&temp.path().join("index"))?;
@@ -662,7 +662,7 @@ fn rescans_skip_unchanged_passages_and_roll_back_failed_changes() -> Result<()> 
     assert_eq!(count, model.passages);
     assert_eq!(
         report.unchanged,
-        7 + usize::try_from(index.status()?.commands)?
+        9 + usize::try_from(index.status()?.commands)?
     );
 
     fs::remove_file(disappearing)?;
@@ -683,7 +683,7 @@ fn rescans_skip_unchanged_passages_and_roll_back_failed_changes() -> Result<()> 
     assert_eq!((report.written, report.removed), (1, 1));
     assert!(index.remove_root(&root)?);
     let status = index.status()?;
-    assert_eq!((status.files, status.settings), (0, 5));
+    assert_eq!((status.files, status.settings), (0, 7));
     assert_eq!(status.chunks, catalog_chunks);
     Ok(())
 }
@@ -758,12 +758,16 @@ fn file_kind_filters_list_multiple_formats_and_search_media_names() -> Result<()
     let large_video = fs::File::create(root.join("clips/garden.mp4"))?;
     large_video.set_len(17 * 1024 * 1024)?;
     drop(large_video);
+    fixture(&root, "recordings/garden.FLAC", "hiddenmarker")?;
+    let large_audio = fs::File::create(root.join("recordings/garden.mp3"))?;
+    large_audio.set_len(17 * 1024 * 1024)?;
+    drop(large_audio);
     fixture(&root, "garden.zip", "unsupported")?;
     fixture(&root, ".private/garden.png", "excluded")?;
     let previously_encoded = model.passages;
     index.synchronize(Some(&root), &IndexOptions::default(), &mut model)?;
     let status = index.status()?;
-    assert_eq!(status.files, 5);
+    assert_eq!(status.files, 7);
     assert_eq!(status.chunks, original_chunks);
     let encoded = previously_encoded + usize::try_from(missing_chunks)? + 1;
     assert_eq!(model.passages, encoded);
@@ -773,6 +777,7 @@ fn file_kind_filters_list_multiple_formats_and_search_media_names() -> Result<()
         (FileKind::Text, vec!["txt"]),
         (FileKind::Image, vec!["jpg", "png"]),
         (FileKind::Video, vec!["mp4", "webm"]),
+        (FileKind::Audio, vec!["flac", "mp3"]),
     ] {
         let filters = SearchOptions {
             file_kind: Some(kind),
@@ -801,7 +806,7 @@ fn file_kind_filters_list_multiple_formats_and_search_media_names() -> Result<()
     fs::remove_file(root.join("garden.JPG"))?;
     assert!(index.search("garden.JPG", &jpg, &mut model)?.is_empty());
     index.synchronize(Some(&root), &IndexOptions::default(), &mut model)?;
-    assert_eq!(index.status()?.files, 4);
+    assert_eq!(index.status()?.files, 6);
     assert_eq!(model.passages, encoded);
     jpg.file_kind = Some(FileKind::Video);
     assert!(index.search("", &jpg, &mut model)?.is_empty());

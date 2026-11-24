@@ -401,7 +401,7 @@ impl Index {
         let file_kind = options
             .file_kind
             .or_else(|| extension.as_deref().and_then(FileKind::from_extension));
-        if file_kind != Some(FileKind::Video) {
+        if !matches!(file_kind, Some(FileKind::Video | FileKind::Audio)) {
             let direct_images = crate::index::direct_image_index(&tx)?;
             let mut encode = Some(encode);
             let mut query_embedding = None;

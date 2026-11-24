@@ -1,5 +1,5 @@
 use crate::{
-    applications::{self, Application},
+    applications::{self, Application, DesktopEntries},
     catalog::SETTINGS,
     commands::{COMMANDS, Distro},
     files::{self, FileKind, HitLocation, Passage},
@@ -500,7 +500,21 @@ impl Index {
         let direct_images = model.supports_images();
         save_image_recipe(&tx, direct_images)?;
         progress(InitProgress::Catalogs);
-        synchronize_catalog(&tx, model, &mut report)?;
+        let desktop_entries = if initializing {
+            Some(applications::discover(
+                root.as_deref().expect("init has a home"),
+                true,
+            )?)
+        } else if root.is_none()
+            && let Some(home) = std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .filter(|home| home.is_absolute())
+        {
+            Some(applications::discover(&home, false)?)
+        } else {
+            None
+        };
+        synchronize_catalog(&tx, desktop_entries.as_ref(), model, &mut report)?;
         synchronize_commands(&tx, model, &mut report)?;
         if let Some(root) = root {
             let name = root.to_str().context("index roots must be valid UTF-8")?;
@@ -567,10 +581,9 @@ impl Index {
                     &mut report_file,
                 )?;
             }
-            if initializing {
+            if let Some(entries) = &desktop_entries {
                 progress(InitProgress::Applications);
-                let applications = applications::discover(&root)?;
-                synchronize_applications(&tx, &applications, model, &mut report)?;
+                synchronize_applications(&tx, &entries.applications, model, &mut report)?;
             }
         }
         if let Some(distro) = local_command_distro {
@@ -834,7 +847,9 @@ fn store_chunk(
     passage: &Passage<'_>,
     embedding: &[u8],
 ) -> Result<()> {
-    let searchable_title = if source.key.starts_with(manuals::KEY_PREFIX) {
+    let searchable_title = if source.key.starts_with(manuals::KEY_PREFIX)
+        || source.key.starts_with(applications::SETTING_PREFIX)
+    {
         source.title.to_owned()
     } else {
         format!("{} {}", source.title, source.key)
@@ -860,10 +875,13 @@ fn store_chunk(
 
 fn synchronize_catalog(
     tx: &Transaction<'_>,
+    entries: Option<&DesktopEntries>,
     model: &mut impl Embedder,
     report: &mut IndexReport,
 ) -> Result<()> {
     let mut keep = Vec::new();
+    let local =
+        entries.and_then(|entries| entries.desktop.map(|desktop| (desktop, &entries.settings)));
     for setting in SETTINGS {
         let text = format!("{} {}", setting.description, setting.synonyms);
         let texts = translated_passages(setting.id, &text);
@@ -892,7 +910,49 @@ fn synchronize_catalog(
             report,
         )?);
     }
-    remove_missing_sources(tx, "setting", false, &keep, report)
+    if let Some((desktop, settings)) = local {
+        for entry in settings {
+            // Move settings previously scanned as applications to their own category.
+            report.removed += tx.execute(
+                "DELETE FROM sources WHERE key = ?1 AND category = 'application'",
+                [&entry.id],
+            )?;
+            let key = format!("{}{desktop}.{}", applications::SETTING_PREFIX, entry.id);
+            let texts: Vec<_> = entry.texts.iter().map(String::as_str).collect();
+            let digest = Sha256::digest(format!(
+                "local-setting-v1\n{}\n{}",
+                entry.name,
+                texts.join("\0")
+            ));
+            keep.push(sync_catalog_entry(
+                tx,
+                Source {
+                    key: &key,
+                    category: "setting",
+                    title: &entry.name,
+                    root: None,
+                    extension: None,
+                    desktop: Some(desktop),
+                    setting_group: None,
+                    distro: None,
+                    example: None,
+                },
+                &texts,
+                &digest,
+                model,
+                report,
+            )?);
+        }
+    }
+    remove_missing_sources(
+        tx,
+        "setting",
+        local
+            .is_none()
+            .then_some((applications::SETTING_PREFIX, false)),
+        &keep,
+        report,
+    )
 }
 
 fn synchronize_applications(
@@ -928,7 +988,7 @@ fn synchronize_applications(
             report,
         )?);
     }
-    remove_missing_sources(tx, "application", false, &keep, report)
+    remove_missing_sources(tx, "application", None, &keep, report)
 }
 
 fn synchronize_commands(
@@ -965,7 +1025,13 @@ fn synchronize_commands(
             report,
         )?);
     }
-    remove_missing_sources(tx, "command", false, &keep, report)
+    remove_missing_sources(
+        tx,
+        "command",
+        Some((manuals::KEY_PREFIX, false)),
+        &keep,
+        report,
+    )
 }
 
 fn translated_passages<'a>(id: &str, primary: &'a str) -> Vec<&'a str> {
@@ -1008,7 +1074,13 @@ fn synchronize_local_commands(
             report,
         )?);
     }
-    remove_missing_sources(tx, "command", true, &keep, report)
+    remove_missing_sources(
+        tx,
+        "command",
+        Some((manuals::KEY_PREFIX, true)),
+        &keep,
+        report,
+    )
 }
 
 fn sync_catalog_entry(
@@ -1036,18 +1108,17 @@ fn sync_catalog_entry(
 fn remove_missing_sources(
     tx: &Transaction<'_>,
     category: &str,
-    local_commands: bool,
+    partition: Option<(&str, bool)>,
     keep: &[i64],
     report: &mut IndexReport,
 ) -> Result<()> {
+    let pattern = partition.map(|(prefix, _)| format!("{prefix}*"));
     let ids = tx
-        .prepare("SELECT id FROM sources WHERE category = ?1 AND (key GLOB ?2) = ?3")?
+        .prepare(
+            "SELECT id FROM sources WHERE category = ?1 AND (?2 IS NULL OR (key GLOB ?2) = ?3)",
+        )?
         .query_map(
-            params![
-                category,
-                format!("{}*", manuals::KEY_PREFIX),
-                local_commands
-            ],
+            params![category, pattern, partition.map(|(_, included)| included)],
             |row| row.get::<_, i64>(0),
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;

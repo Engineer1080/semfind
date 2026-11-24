@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import sys
@@ -34,6 +35,7 @@ ICONS = {
     "file": "text-x-generic",
     "application": "applications-other",
     "command": "utilities-terminal",
+    "setting": "preferences-system",
 }
 
 
@@ -72,7 +74,8 @@ class Provider:
             [self.cli, "search", "--json", "--limit", "32", "--no-gpu-hint", "--", query],
             env=self.env, stdout=subprocess.PIPE, timeout=30, check=True,
         )
-        return [hit for hit in json.loads(result.stdout) if hit["category"] in ICONS][:8]
+        return [hit for hit in json.loads(result.stdout) if hit["category"] in ICONS
+                and (hit["category"] != "setting" or hit["id"].startswith("setting.local."))][:8]
 
     def enqueue(self, call, interface, query):
         signature = INTERFACES[interface][call.get_method_name()][1]
@@ -158,6 +161,17 @@ class Provider:
             app = Gio.DesktopAppInfo.new(hit["id"])
             if app:
                 app.launch([], None)
+        elif hit["category"] == "setting":
+            match = re.fullmatch(r"setting\.local\.([a-z]+)\.([A-Za-z0-9][A-Za-z0-9_.-]*)", hit["id"])
+            if not match:
+                return
+            desktop, target = match.groups()
+            if target.endswith(".desktop"):
+                app = Gio.DesktopAppInfo.new(target)
+                if app:
+                    app.launch([], None)
+            elif desktop == "kde":
+                subprocess.Popen(["kcmshell6", "--", target], start_new_session=True)
 
     def launch_terminal(self, query):
         command = " ".join(GLib.shell_quote(value) for value in

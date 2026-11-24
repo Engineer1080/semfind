@@ -23,6 +23,7 @@ pub enum FileKind {
     Text,
     Image,
     Video,
+    Audio,
 }
 
 /// The position of an indexed passage in its source file.
@@ -67,6 +68,8 @@ impl FileKind {
             "mp4" | "m4v" | "mov" | "mkv" | "webm" | "avi" | "mpg" | "mpeg" | "wmv" | "3gp" => {
                 Some(Self::Video)
             }
+            "mp3" | "flac" | "wav" | "ogg" | "oga" | "opus" | "m4a" | "aac" | "wma" | "aif"
+            | "aiff" | "alac" | "mka" | "ape" | "amr" => Some(Self::Audio),
             _ => None,
         }
     }

@@ -33,6 +33,7 @@ impl LauncherResult {
             Category::File => match hit.extension.as_deref().and_then(FileKind::from_extension) {
                 Some(FileKind::Image) => "image-x-generic",
                 Some(FileKind::Video) => "video-x-generic",
+                Some(FileKind::Audio) => "audio-x-generic",
                 _ => "text-x-generic",
             },
             Category::Application => "applications-other",
@@ -90,17 +91,27 @@ pub(crate) fn activate(hit: &Hit) -> Result<bool> {
             launcher
         }
         Category::Setting => {
-            let page = match hit.id.as_str() {
-                "audio.output.volume" => "sound",
-                "display.brightness" => "displays",
-                "network.wifi" => "wireless",
-                "input.keyboard" => "keyboard",
-                "power.battery" => "power",
-                _ => return Ok(false),
-            };
-            let mut launcher = Command::new("cosmic-settings");
-            launcher.arg(page);
-            launcher
+            if let Some(id) = hit.id.strip_prefix("setting.local.cosmic.") {
+                if !id.ends_with(".desktop") || Path::new(id).file_name() != Some(OsStr::new(id)) {
+                    return Ok(false);
+                }
+                let mut launcher = Command::new("gtk-launch");
+                launcher.args(["--", id]);
+                launcher
+            } else {
+                let page = match hit.id.as_str() {
+                    "audio.output.volume" => "sound",
+                    "display.brightness" | "display.mode" => "displays",
+                    "system.language" => "region-language",
+                    "network.wifi" => "wireless",
+                    "input.keyboard" => "keyboard",
+                    "power.battery" => "power",
+                    _ => return Ok(false),
+                };
+                let mut launcher = Command::new("cosmic-settings");
+                launcher.arg(page);
+                launcher
+            }
         }
         Category::Command | Category::Action => return Ok(false),
     };

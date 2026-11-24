@@ -22,6 +22,20 @@ pub(crate) const SETTINGS: &[Setting] = &[
         group: "display",
     },
     Setting {
+        id: "display.mode",
+        title: "Displays / Auflösung und Bildwiederholrate",
+        description: "Change the monitor resolution and refresh rate. Bildschirmauflösung und Bildwiederholfrequenz des Monitors einstellen.",
+        synonyms: "Auflösung ändern, Hertz, Hz, 60 Hz, 120 Hz, 144 Hz, Bildschirmfrequenz, change screen resolution, refresh rate",
+        group: "display",
+    },
+    Setting {
+        id: "system.language",
+        title: "Region & Language / Sprache ändern",
+        description: "Change the desktop display language and regional formats. Sprache der Menüs und regionale Formate einstellen.",
+        synonyms: "Systemsprache, Anzeigesprache, Region und Sprache, Menüs auf Deutsch umstellen, change system language, locale",
+        group: "system",
+    },
+    Setting {
         id: "network.wifi",
         title: "Network & Wireless / WLAN",
         description: "Connect to wireless networks and manage Wi-Fi connections. WLAN-Netzwerke verbinden und verwalten.",

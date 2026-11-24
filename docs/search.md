@@ -47,7 +47,16 @@ The built-in command and COSMIC catalogs index descriptions in all twelve langua
 
 ## Find Linux commands
 
-Run `semfind index` to load the built-in command and settings catalogs without scanning personal folders. Both `semfind init` and directory indexing also refresh the command catalog.
+Run `semfind index` to refresh the built-in catalogs and discover installed settings without scanning personal folders. Both `semfind init` and directory indexing also refresh the command catalog.
+
+Desktop settings discovery reads the settings launchers registered for the current COSMIC, GNOME, KDE Plasma 6, Cinnamon, Xfce, MATE, or LXQt session. Plasma 6 also lists installed settings modules via `kcmshell6 --list`. Semfind indexes the names, descriptions, and keywords made available by the desktop. It can find pages that are hidden from the application menu and supplements their metadata with a built-in catalog of common tasks. Coverage depends on the pages and keywords exposed by the installed desktop.
+
+```bash
+semfind "Hertz" --category setting
+semfind "Sprache ändern" --category setting
+```
+
+Run `semfind index` again from your desktop session to pick up changes after installing or removing settings modules. The active embedding model generates vectors for the settings texts. `semfind reindex` can rebuild those vectors when switching models.
 
 ```bash
 semfind index
@@ -76,10 +85,11 @@ Semfind searches the contents of supported UTF-8 files, including plain text, Ma
 ```bash
 semfind "Sommerurlaub" --kind image
 semfind --kind video --path "$HOME/Videos"
+semfind "Probe" --kind audio
 semfind "Datenschutz" --kind text --type pdf
 ```
 
-`--kind` groups file extensions and can list indexed files without a query. Images are searchable by filename and path, and captioned images are also searchable by subject. Videos are searchable by filename and path. Listing files and searching filenames in an index with no matching embeddings work without loading the model.
+`--kind` groups file extensions and can list indexed files without a query. Images are searchable by filename and path, and images with captions or direct image embeddings are also searchable by subject. Videos and audio are searchable by filename and path. The audio filter includes MP3, FLAC, WAV, Ogg, Opus and M4A. Refresh your indexed folders to add audio files to an existing index. Listing files and searching filenames in an index with no matching embeddings work without loading the model.
 
 ```bash
 semfind index "$HOME/Documents" --exclude Private --exclude Archive/taxes

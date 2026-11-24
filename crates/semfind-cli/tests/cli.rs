@@ -17,6 +17,9 @@ fn cli(index: &Path) -> Command {
         .arg(index)
         .env("LC_ALL", "C")
         .env("XDG_CONFIG_HOME", index.with_file_name("config"))
+        .env_remove("XDG_CURRENT_DESKTOP")
+        .env_remove("XDG_SESSION_DESKTOP")
+        .env_remove("DESKTOP_SESSION")
         .env_remove("SEMFIND_NO_GPU_HINT")
         .env_remove("SEMFIND_DAEMON_IDLE_SECONDS");
     command
@@ -813,6 +816,11 @@ fn real_model_init_indexes_home_desktop_applications_and_manuals() -> Result<()>
         system_apps.join("other.desktop"),
         "[Desktop Entry]\nType=Application\nName=Other Viewer\nNotShowIn=COSMIC;\n",
     )?;
+    let bluetooth = system_apps.join("com.system76.CosmicSettings.Bluetooth.desktop");
+    fs::write(
+        &bluetooth,
+        "[Desktop Entry]\nType=Application\nName=Bluetooth\nKeywords[de]=Funkgeräte;\nExec=cosmic-settings bluetooth\nOnlyShowIn=COSMIC;\nNoDisplay=true\n",
+    )?;
     let command = || {
         let mut command = cli(&index);
         command
@@ -846,7 +854,27 @@ fn real_model_init_indexes_home_desktop_applications_and_manuals() -> Result<()>
     assert_eq!(status["roots"], serde_json::json!([home]));
     assert_eq!(status["files"], 1, "{status}");
     assert_eq!(status["applications"], 1, "{status}");
-    assert_eq!(status["settings"], 5, "{status}");
+    assert_eq!(status["settings"], 8, "{status}");
+    let bluetooth_hits: Vec<Hit> = serde_json::from_slice(&run(&[
+        "Funkgeräte",
+        "--category",
+        "setting",
+        "--limit",
+        "1",
+        "--json",
+    ])?)?;
+    assert_eq!(
+        bluetooth_hits[0].id,
+        "setting.local.cosmic.com.system76.CosmicSettings.Bluetooth.desktop"
+    );
+    assert_eq!(bluetooth_hits[0].desktop.as_deref(), Some("cosmic"));
+    let refresh = String::from_utf8(run(&["index"])?)?;
+    assert!(refresh.contains("Written: 0"), "{refresh}");
+    fs::remove_file(bluetooth)?;
+    let refresh = String::from_utf8(run(&["index"])?)?;
+    assert!(refresh.contains("Removed: 1"), "{refresh}");
+    let status: serde_json::Value = serde_json::from_slice(&run(&["status", "--json"])?)?;
+    assert_eq!(status["settings"], 7, "{status}");
     let commands = status["commands"].as_u64().context("command count")?;
     assert!(commands > 0);
     let hits: Vec<Hit> = serde_json::from_slice(&run(&[
@@ -895,7 +923,7 @@ fn real_model_init_indexes_home_desktop_applications_and_manuals() -> Result<()>
     assert!(
         report.contains(&format!(
             "Written: 0 | Unchanged: {} | Removed: 2",
-            5 + commands
+            7 + commands
         )),
         "{report}"
     );
@@ -949,7 +977,7 @@ fn real_model_init_indexes_home_desktop_applications_and_manuals() -> Result<()>
     assert!(!rebuilt.contains("Total indexing time"));
     assert!(!rebuilt.contains("GPU setup"));
     assert!(
-        rebuilt.contains(&format!("Written: {} | Unchanged: 0", 6 + commands)),
+        rebuilt.contains(&format!("Written: {} | Unchanged: 0", 8 + commands)),
         "{rebuilt}"
     );
     let after: serde_json::Value = serde_json::from_slice(&run(&["status", "--json"])?)?;
@@ -1143,6 +1171,7 @@ fn real_model_searches_across_languages_and_indexes_pdf() -> Result<()> {
     fs::write(root.join("workshop.png"), b"metadata-only image fixture")?;
     fs::write(root.join("workshop.jpg"), b"metadata-only image fixture")?;
     fs::write(root.join("workshop.mp4"), b"metadata-only video fixture")?;
+    fs::write(root.join("workshop.flac"), b"metadata-only audio fixture")?;
     success(cli(&index).arg("index").arg(&root).output()?)?;
     let search = |args: &[&str]| -> Result<Vec<Hit>> {
         let result = success(cli(&index).args(args).arg("--json").output()?)?;
@@ -1202,6 +1231,12 @@ fn real_model_searches_across_languages_and_indexes_pdf() -> Result<()> {
     assert_eq!(videos.len(), 1);
     assert_eq!(videos[0].title, "workshop.mp4");
     assert!(videos[0].location.is_none());
+    let audio = media_search(&["search", "--kind", "audio"])?;
+    assert_eq!(audio.len(), 1);
+    assert_eq!(audio[0].title, "workshop.flac");
+    let named_audio = media_search(&["search", "--kind", "audio", "workshop"])?;
+    assert_eq!(named_audio.len(), 1);
+    assert_eq!(named_audio[0].path, audio[0].path);
     assert_eq!(
         media_search(&["workshop", "--type", "mp4"])?[0].title,
         "workshop.mp4"
@@ -1215,6 +1250,14 @@ fn real_model_searches_across_languages_and_indexes_pdf() -> Result<()> {
     ])?;
     assert_eq!(settings[0].id, "display.brightness");
     assert!(settings[0].location.is_none());
+    for (query, id) in [
+        ("Sprache ändern", "system.language"),
+        ("auflösung", "display.mode"),
+        ("hertz", "display.mode"),
+    ] {
+        let hits = search(&[query, "--category", "settings", "--limit", "1"])?;
+        assert_eq!(hits.first().map(|hit| hit.id.as_str()), Some(id), "{query}");
+    }
     let retention = search(&[
         "Wie lange sollen personenbezogene Daten gespeichert werden?",
         "--type",

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.5
+
+- Discover installed settings pages in COSMIC, GNOME, KDE Plasma 6, Cinnamon, Xfce, MATE, and LXQt. Index available translations and open discovered pages from the desktop app. Run `semfind index` from your desktop session to refresh the catalog without rescanning personal folders.
+- Find display resolution, refresh rate, and system language in the built-in catalog. On COSMIC, these results open Displays or Region & Language.
+- Add localized Images, Videos, and Audio search areas to the desktop app. Select a media area with an empty search field to browse indexed files. Add `--kind audio` to the CLI and refresh indexed folders to include existing audio files by filename and path.
+
 ## 0.4.4
 
 - Add an Open button for supported setting results that opens the matching panel on COSMIC, GNOME, KDE Plasma 6, Cinnamon, Xfce, MATE, and LXQt when the appropriate tool is installed.
