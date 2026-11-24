@@ -91,8 +91,9 @@ def stage_gui(build, version):
     for directory in (library, bin_dir, doc, apps, metainfo, stage / "DEBIAN"):
         directory.mkdir(parents=True)
 
-    for filename in ("app.py", "style.css"):
+    for filename in ("app.py", "i18n.py", "style.css"):
         shutil.copyfile(GUI / filename, library / filename)
+    shutil.copytree(GUI / "locales", library / "locales")
     (bin_dir / "semfind-gui").symlink_to("../lib/semfind-gui/app.py")
     (library / "app.py").chmod(0o755)
     shutil.copyfile(ROOT / "LICENSE", doc / "copyright")

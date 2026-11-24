@@ -36,14 +36,14 @@ semfind status --json
 
 ## Languages
 
-Terminal help, setup reminders, and status labels are available in English, German, Russian, Portuguese, French, Spanish, and Italian. semfind uses the configured message locale. It reads `LC_ALL`, `LC_MESSAGES`, and `LANG` in that order, with `LANGUAGE` preferences for non-`C` locales. The command names, flags, and JSON fields use stable identifiers.
+Terminal help, setup reminders, and status labels are available in English, German, Russian, Portuguese, French, Spanish, Italian, Simplified Chinese, Japanese, Dutch, Polish, and Turkish. The GTK desktop app is available in the same languages. Chinese locales use the Simplified Chinese translation. Semfind uses the configured message locale. It reads `LC_ALL`, `LC_MESSAGES`, and `LANG` in that order, with `LANGUAGE` preferences for non-`C` locales. The command names, flags, and JSON fields use stable identifiers.
 
 ```bash
 LC_ALL=fr_FR.UTF-8 semfind --help
 semfind "Comment installer un nouveau paquet ?" --category command
 ```
 
-The built-in command and COSMIC catalogs index descriptions in all seven languages. Run `semfind index` to add the translations to an existing catalog. Run `semfind init` to refresh translated desktop application metadata and local manuals when available. The five additional languages were selected from voluntarily reported desktop locales, grouped by language. [Linux Hardware Trends](https://github.com/linuxhw/Trends/blob/master/Desktop/README.md#os-lang)
+The built-in command and COSMIC catalogs index descriptions in all twelve languages. Run `semfind index` to add the translations to an existing catalog. Run `semfind init` to refresh translated desktop application metadata and local manuals when available.
 
 ## Find Linux commands
 

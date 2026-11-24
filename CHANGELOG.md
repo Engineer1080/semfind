@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2
+
+- Add Simplified Chinese, Japanese, Dutch, Polish, and Turkish to terminal help, setup hints, status messages, and the built-in command and COSMIC settings catalogs.
+- Localize the GTK desktop app in all twelve supported languages. Use the Linux message locale for search, result labels, model selection, dialogs, and index management. Include the translations and desktop menu comments in the Debian package.
+
 ## 0.4.1
 
 - Show the Semfind logo and the active CLI version in the desktop app header.

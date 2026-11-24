@@ -490,6 +490,31 @@ fn terminal_messages_follow_locale_without_changing_json() -> Result<()> {
             "Ricerca semantica locale",
             "File:",
         ),
+        ("zh_CN.UTF-8", "用法:", "本地语义搜索", "文件:"),
+        (
+            "ja_JP.UTF-8",
+            "使用法:",
+            "ローカルセマンティック検索",
+            "ファイル:",
+        ),
+        (
+            "nl_NL.UTF-8",
+            "Gebruik:",
+            "Lokale semantische zoekfunctie",
+            "Bestanden:",
+        ),
+        (
+            "pl_PL.UTF-8",
+            "Użycie:",
+            "Lokalne wyszukiwanie semantyczne",
+            "Pliki:",
+        ),
+        (
+            "tr_TR.UTF-8",
+            "Kullanım:",
+            "yerel anlamsal arama",
+            "Dosyalar:",
+        ),
     ] {
         let command = || {
             let mut command = cli(&index);
@@ -541,6 +566,23 @@ fn real_model_searches_all_added_catalog_languages() -> Result<()> {
         (
             "Come installo un nuovo pacchetto?",
             "Come aumento la luminosità dello schermo?",
+        ),
+        ("如何安装一个新的软件包？", "怎样把屏幕调亮？"),
+        (
+            "新しいパッケージをインストールするには？",
+            "画面をもっと明るくするには？",
+        ),
+        (
+            "Hoe installeer ik een nieuw pakket?",
+            "Hoe maak ik mijn scherm helderder?",
+        ),
+        (
+            "Jak zainstalować nowy pakiet?",
+            "Jak zwiększyć jasność ekranu?",
+        ),
+        (
+            "Yeni bir yazılım paketi nasıl kurulur?",
+            "Ekran parlaklığını nasıl artırırım?",
         ),
     ] {
         for (query, category, expected) in [

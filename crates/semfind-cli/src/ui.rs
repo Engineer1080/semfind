@@ -1,5 +1,11 @@
 use semfind_core::{Category, Language};
 
+mod ja;
+mod nl;
+mod pl;
+mod tr;
+mod zh;
+
 pub(crate) struct Messages {
     pub about: &'static str,
     pub init: &'static str,
@@ -68,6 +74,11 @@ impl Messages {
             Language::Fr => &FR,
             Language::Es => &ES,
             Language::It => &IT,
+            Language::Zh => &zh::MESSAGES,
+            Language::Ja => &ja::MESSAGES,
+            Language::Nl => &nl::MESSAGES,
+            Language::Pl => &pl::MESSAGES,
+            Language::Tr => &tr::MESSAGES,
         }
     }
 

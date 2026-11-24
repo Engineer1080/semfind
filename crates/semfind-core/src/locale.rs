@@ -9,6 +9,11 @@ pub enum Language {
     Fr,
     Es,
     It,
+    Zh,
+    Ja,
+    Nl,
+    Pl,
+    Tr,
 }
 
 impl Language {
@@ -22,6 +27,11 @@ impl Language {
             "fr" => Some(Self::Fr),
             "es" => Some(Self::Es),
             "it" => Some(Self::It),
+            "zh" => Some(Self::Zh),
+            "ja" => Some(Self::Ja),
+            "nl" => Some(Self::Nl),
+            "pl" => Some(Self::Pl),
+            "tr" => Some(Self::Tr),
             _ => None,
         }
     }

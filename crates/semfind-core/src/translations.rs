@@ -1,4 +1,5 @@
-// Search passages in the order Russian, Portuguese, French, Spanish, Italian.
+// Search passages in the order Russian, Portuguese, French, Spanish, Italian,
+// Simplified Chinese, Japanese, Dutch, Polish, Turkish.
 pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
     let topic = id
         .strip_suffix(".debian")
@@ -11,6 +12,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Régler le volume sonore et choisir les haut-parleurs ou le casque. Augmenter, baisser ou couper le son.",
             "Ajustar el volumen de salida y elegir altavoces o auriculares. Subir, bajar o silenciar el sonido.",
             "Regolare il volume e scegliere altoparlanti o cuffie. Alzare, abbassare o disattivare l’audio.",
+            "调节输出音量，选择扬声器或耳机。提高、降低音量或静音。",
+            "出力音量を調整し、スピーカーやヘッドホンを選ぶ。音量を上げる、下げる、消音する。",
+            "Pas het volume aan en kies luidsprekers of een koptelefoon. Zet het geluid harder, zachter of uit.",
+            "Dostosuj głośność i wybierz głośniki lub słuchawki. Zwiększ, zmniejsz lub wycisz dźwięk.",
+            "Ses düzeyini ayarla ve hoparlör veya kulaklık seç. Sesi aç, kıs veya kapat.",
         ],
         "display.brightness" => &[
             "Настройка яркости экрана. Экран слишком тёмный, как увеличить яркость и сделать дисплей светлее?",
@@ -18,6 +24,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Régler la luminosité de l’écran. Mon écran est trop sombre, comment augmenter la luminosité ?",
             "Ajustar el brillo de la pantalla. Mi pantalla está demasiado oscura, ¿cómo subo el brillo?",
             "Regolare la luminosità dello schermo. Il mio schermo è troppo scuro, come posso aumentare la luminosità?",
+            "调节屏幕亮度。屏幕太暗时提高显示器亮度。",
+            "画面の明るさを調整する。ディスプレイが暗すぎるので輝度を上げたい。",
+            "Pas de helderheid van het scherm aan. Maak een te donker beeldscherm helderder.",
+            "Dostosuj jasność ekranu. Rozjaśnij ekran, gdy wyświetlacz jest zbyt ciemny.",
+            "Ekran parlaklığını ayarla. Ekran çok karanlıksa parlaklığı artır.",
         ],
         "network.wifi" => &[
             "Подключение к сети Wi-Fi и управление беспроводным интернетом. Не работает Wi-Fi, найти точку доступа.",
@@ -25,6 +36,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Se connecter au Wi-Fi et gérer les réseaux sans fil. Résoudre un problème de connexion ou rejoindre un point d’accès.",
             "Conectarse al wifi y gestionar redes inalámbricas. Resolver problemas de conexión o unirse a un punto de acceso.",
             "Connettersi al Wi-Fi e gestire le reti senza fili. Risolvere problemi di connessione o accedere a un hotspot.",
+            "连接 Wi-Fi，管理无线网络，排查网络连接问题。",
+            "Wi-Fi に接続し、無線ネットワークを管理する。接続の問題を解決する。",
+            "Verbind met wifi, beheer draadloze netwerken en los verbindingsproblemen op.",
+            "Połącz się z Wi-Fi, zarządzaj sieciami bezprzewodowymi i rozwiąż problemy z połączeniem.",
+            "Wi-Fi ağına bağlan, kablosuz ağları yönet ve bağlantı sorunlarını gider.",
         ],
         "input.keyboard" => &[
             "Изменить раскладку и язык ввода клавиатуры. Настройки набора текста и переключение языков.",
@@ -32,6 +48,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Changer la disposition du clavier et la langue de saisie. Régler les préférences de frappe.",
             "Cambiar la distribución del teclado y el idioma de entrada. Ajustar las preferencias de escritura.",
             "Cambiare la disposizione della tastiera e la lingua di input. Configurare le preferenze di digitazione.",
+            "更改键盘布局和输入语言，设置打字偏好和语言切换。",
+            "キーボード配列や入力言語を変更し、入力方法や言語の切り替えを設定する。",
+            "Wijzig de toetsenbordindeling en invoertaal. Stel het wisselen tussen talen in.",
+            "Zmień układ klawiatury i język wprowadzania. Skonfiguruj przełączanie języków.",
+            "Klavye düzenini ve giriş dilini değiştir. Yazma tercihlerini ve dil geçişini ayarla.",
         ],
         "power.battery" => &[
             "Настройки питания и аккумулятора. Включить энергосбережение и продлить работу ноутбука от батареи.",
@@ -39,6 +60,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Régler l’alimentation et la batterie. Activer l’économie d’énergie et prolonger l’autonomie du portable.",
             "Configurar la energía y la batería. Activar el ahorro de energía y prolongar la autonomía del portátil.",
             "Gestire alimentazione e batteria. Attivare il risparmio energetico e prolungare l’autonomia del portatile.",
+            "设置电源和电池，开启节能模式，延长笔记本电脑的续航时间。",
+            "電源とバッテリーの設定を変更する。省電力モードでノートパソコンの駆動時間を延ばす。",
+            "Stel energie en accu in. Schakel energiebesparing in om langer op de accu te werken.",
+            "Zmień ustawienia zasilania i baterii. Włącz oszczędzanie energii, aby wydłużyć pracę na baterii.",
+            "Güç ve pil ayarlarını değiştir. Pil ömrünü uzatmak için güç tasarrufunu aç.",
         ],
         "command.disk.free" => &[
             "Показать свободное и занятое место на подключённых файловых системах и дисках.",
@@ -46,6 +72,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Afficher l’espace disque libre et utilisé sur les systèmes de fichiers montés.",
             "Mostrar el espacio libre y ocupado en discos y sistemas de archivos montados.",
             "Mostrare lo spazio libero e utilizzato sui dischi e sui file system montati.",
+            "显示已挂载的文件系统和磁盘的可用空间和已用空间。",
+            "マウント済みのファイルシステムやディスクの空き容量と使用量を表示する。",
+            "Toon vrije en gebruikte ruimte op gekoppelde bestandssystemen en schijven.",
+            "Pokaż wolne i zajęte miejsce na zamontowanych systemach plików i dyskach.",
+            "Bağlı dosya sistemleri ve disklerdeki boş ve kullanılan alanı göster.",
         ],
         "command.disk.directory-usage" => &[
             "Определить, какие каталоги занимают больше всего места. Отсортировать папки по размеру.",
@@ -53,6 +84,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Trouver les dossiers qui occupent le plus de place. Trier les répertoires par taille.",
             "Averiguar qué carpetas ocupan más espacio. Ordenar los directorios por tamaño.",
             "Scoprire quali cartelle occupano più spazio. Ordinare le directory per dimensione.",
+            "查找占用空间最多的文件夹，按目录大小排序。",
+            "容量を多く使っているフォルダーを調べ、ディレクトリをサイズ順に並べる。",
+            "Zoek de mappen die de meeste schijfruimte innemen en sorteer ze op grootte.",
+            "Sprawdź, które katalogi zajmują najwięcej miejsca, i posortuj je według rozmiaru.",
+            "En çok alan kaplayan dizinleri bul ve boyutlarına göre sırala.",
         ],
         "command.files.find-name" => &[
             "Искать файлы по имени или расширению во всех вложенных каталогах.",
@@ -60,6 +96,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Chercher des fichiers par nom ou extension dans tous les sous-dossiers.",
             "Buscar archivos por nombre o extensión en todas las subcarpetas.",
             "Cercare file per nome o estensione in tutte le sottocartelle.",
+            "在目录及其所有子目录中按名称或扩展名查找文件。",
+            "名前や拡張子で、ディレクトリとそのサブディレクトリからファイルを探す。",
+            "Zoek bestanden op naam of extensie in een map en alle submappen.",
+            "Znajdź pliki według nazwy lub rozszerzenia we wszystkich podkatalogach.",
+            "Bir dizinde ve alt dizinlerde dosyaları ada veya uzantıya göre bul.",
         ],
         "command.files.find-large" => &[
             "Найти большие файлы в каталоге и подпапках, например файлы размером более 100 МБ.",
@@ -67,6 +108,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Trouver les gros fichiers dans les sous-dossiers, par exemple ceux de plus de 100 Mo.",
             "Encontrar archivos grandes en subcarpetas, por ejemplo, archivos de más de 100 MB.",
             "Trovare file di grandi dimensioni nelle sottocartelle, per esempio quelli sopra 100 MB.",
+            "在目录及其子目录中查找大文件，例如超过 100 MB 的文件。",
+            "ディレクトリとサブディレクトリから、100 MB を超えるような大きいファイルを探す。",
+            "Zoek grote bestanden in mappen en submappen, bijvoorbeeld bestanden groter dan 100 MB.",
+            "Znajdź duże pliki w katalogu i podkatalogach, na przykład większe niż 100 MB.",
+            "Bir dizinde ve alt dizinlerde 100 MB üzeri gibi büyük dosyaları bul.",
         ],
         "command.files.list" => &[
             "Показать файлы текущего каталога, включая скрытые, с размером, датой и правами доступа.",
@@ -74,6 +120,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Lister les fichiers du dossier courant, y compris les fichiers cachés, avec taille, date et permissions.",
             "Listar los archivos de la carpeta actual, incluidos los ocultos, con tamaño, fecha y permisos.",
             "Elencare i file della cartella corrente, compresi quelli nascosti, con dimensione, data e permessi.",
+            "列出当前目录中的文件和隐藏文件，同时显示大小、日期和权限。",
+            "現在のディレクトリのファイルを、隠しファイルも含めてサイズ、日付、権限付きで一覧表示する。",
+            "Toon bestanden in de huidige map, ook verborgen bestanden, met grootte, datum en rechten.",
+            "Wyświetl pliki w bieżącym katalogu, również ukryte, wraz z rozmiarem, datą i uprawnieniami.",
+            "Geçerli dizindeki gizli dosyalar dahil tüm dosyaları boyut, tarih ve izinleriyle listele.",
         ],
         "command.files.current-directory" => &[
             "Показать полный абсолютный путь текущего рабочего каталога.",
@@ -81,6 +132,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Afficher le chemin absolu du répertoire de travail courant.",
             "Mostrar la ruta absoluta del directorio de trabajo actual.",
             "Mostrare il percorso assoluto della directory di lavoro corrente.",
+            "显示当前工作目录的完整绝对路径。",
+            "現在の作業ディレクトリの絶対パスを表示する。",
+            "Toon het volledige absolute pad van de huidige werkmap.",
+            "Pokaż pełną ścieżkę bezwzględną bieżącego katalogu roboczego.",
+            "Geçerli çalışma dizininin tam mutlak yolunu göster.",
         ],
         "command.text.find" => &[
             "Найти текст или код ошибки в содержимом файлов и подпапок и вывести номера строк.",
@@ -88,6 +144,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Chercher du texte ou un code d’erreur dans les fichiers et sous-dossiers, avec les numéros de ligne.",
             "Buscar texto o un código de error dentro de archivos y subcarpetas y mostrar los números de línea.",
             "Cercare testo o un codice di errore nel contenuto dei file e delle sottocartelle mostrando i numeri di riga.",
+            "在文件和子目录的内容中查找文本或错误代码，并显示行号。",
+            "ファイルやサブディレクトリ内のテキストやエラーコードを検索し、行番号を表示する。",
+            "Zoek tekst of een foutcode in bestanden en submappen en toon de regelnummers.",
+            "Szukaj tekstu lub kodu błędu w plikach i podkatalogach, wyświetlając numery wierszy.",
+            "Dosyalarda ve alt dizinlerde metin veya hata kodu ara ve satır numaralarını göster.",
         ],
         "command.text.follow-log" => &[
             "Следить за журналом в реальном времени и видеть новые строки по мере добавления.",
@@ -95,6 +156,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Suivre un fichier journal en direct lorsque de nouvelles lignes y sont ajoutées.",
             "Seguir un archivo de registro en tiempo real a medida que se añaden líneas.",
             "Seguire un file di log in tempo reale quando vengono aggiunte nuove righe.",
+            "实时查看日志文件，显示新追加的行。",
+            "ログファイルをリアルタイムで監視し、追記された行を表示する。",
+            "Volg een logbestand in realtime en toon regels zodra ze worden toegevoegd.",
+            "Śledź plik dziennika na żywo i wyświetlaj nowe wiersze w miarę ich dopisywania.",
+            "Bir günlük dosyasını anlık takip et ve eklenen satırları göster.",
         ],
         "command.text.line-count" => &[
             "Подсчитать количество строк в текстовом файле.",
@@ -102,6 +168,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Compter le nombre de lignes dans un fichier texte.",
             "Contar el número de líneas de un archivo de texto.",
             "Contare il numero di righe di un file di testo.",
+            "统计文本文件中的行数。",
+            "テキストファイルの行数を数える。",
+            "Tel het aantal regels in een tekstbestand.",
+            "Policz wiersze w pliku tekstowym.",
+            "Metin dosyasındaki satır sayısını hesapla.",
         ],
         "command.archive.inspect" => &[
             "Просмотреть список файлов в архиве tar.gz без извлечения.",
@@ -109,6 +180,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Lister le contenu d’une archive tar.gz sans en extraire les fichiers.",
             "Listar el contenido de un archivo tar.gz sin extraer sus archivos.",
             "Elencare il contenuto di un archivio tar.gz senza estrarre i file.",
+            "查看 tar 归档文件的内容，无需解压。",
+            "展開せずに tar アーカイブの内容を一覧表示する。",
+            "Bekijk de inhoud van een tar-archief zonder het uit te pakken.",
+            "Wyświetl zawartość archiwum tar bez rozpakowywania.",
+            "Tar arşivini çıkarmadan içeriğini listele.",
         ],
         "command.archive.create" => &[
             "Упаковать каталог в сжатый архив tar.gz.",
@@ -116,6 +192,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Compresser un dossier dans une archive tar.gz.",
             "Comprimir una carpeta en un archivo tar.gz.",
             "Comprimere una cartella in un archivio tar.gz.",
+            "将目录打包并压缩成 tar.gz 文件。",
+            "ディレクトリを tar.gz 形式のアーカイブにまとめて圧縮する。",
+            "Comprimeer een map tot een tar.gz-archief.",
+            "Spakuj katalog do skompresowanego archiwum tar.gz.",
+            "Bir dizini sıkıştırarak tar.gz arşivi oluştur.",
         ],
         "command.system.memory" => &[
             "Показать объём занятой и доступной оперативной памяти и подкачки.",
@@ -123,6 +204,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Afficher la mémoire vive utilisée et disponible ainsi que l’espace d’échange.",
             "Mostrar la memoria RAM usada y disponible y el espacio de intercambio.",
             "Mostrare la memoria RAM usata e disponibile e lo spazio di swap.",
+            "显示已用和可用的 RAM 内存及交换空间。",
+            "使用中と利用可能な RAM およびスワップの容量を表示する。",
+            "Toon gebruikt en beschikbaar RAM en swapruimte.",
+            "Pokaż zajętą i dostępną pamięć RAM oraz przestrzeń wymiany.",
+            "Kullanılan ve kullanılabilir RAM ile takas alanını göster.",
         ],
         "command.system.processes" => &[
             "Перечислить запущенные процессы, показать их PID и отсортировать по загрузке процессора.",
@@ -130,6 +216,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Lister les processus en cours, afficher leur PID et les trier par consommation CPU.",
             "Listar los procesos en ejecución, mostrar su PID y ordenarlos por uso de CPU.",
             "Elencare i processi in esecuzione, mostrare il PID e ordinare per uso della CPU.",
+            "列出运行中的进程，按 CPU 或内存使用量排序。",
+            "実行中のプロセスを表示し、CPU やメモリーの使用量で並べ替える。",
+            "Toon actieve processen en sorteer ze op CPU- of geheugengebruik.",
+            "Wyświetl działające procesy i posortuj je według zużycia CPU lub pamięci.",
+            "Çalışan işlemleri listele ve işlemci veya bellek kullanımına göre sırala.",
         ],
         "command.system.disks" => &[
             "Показать диски, SSD, USB-накопители, разделы и точки монтирования.",
@@ -137,6 +228,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Lister les disques, les SSD, les clés USB, les partitions et les points de montage.",
             "Listar discos, SSD, unidades USB, particiones y puntos de montaje.",
             "Elencare dischi, SSD, unità USB, partizioni e punti di montaggio.",
+            "列出磁盘、分区、文件系统和挂载点。",
+            "ディスク、パーティション、ファイルシステム、マウントポイントを一覧表示する。",
+            "Toon schijven, partities, bestandssystemen en koppelpunten.",
+            "Wyświetl dyski, partycje, systemy plików i punkty montowania.",
+            "Diskleri, bölümleri, dosya sistemlerini ve bağlama noktalarını listele.",
         ],
         "command.system.service-status" => &[
             "Проверить состояние службы systemd и узнать, запущена ли она.",
@@ -144,6 +240,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Vérifier l’état d’un service systemd et savoir s’il est en cours d’exécution.",
             "Consultar el estado de un servicio de systemd y comprobar si está en ejecución.",
             "Controllare lo stato di un servizio systemd e verificare se è in esecuzione.",
+            "检查 systemd 服务的状态，查看服务是否运行或失败。",
+            "systemd サービスの状態を確認し、実行中か失敗しているかを見る。",
+            "Controleer de status van een systemd-dienst en bekijk of die actief is of is mislukt.",
+            "Sprawdź stan usługi systemd, aby ustalić, czy działa lub zakończyła się błędem.",
+            "Bir systemd hizmetinin durumunu, çalışıp çalışmadığını veya hata verip vermediğini kontrol et.",
         ],
         "command.system.boot-logs" => &[
             "Просмотреть системный журнал systemd за текущую загрузку.",
@@ -151,6 +252,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Consulter le journal systemd du démarrage actuel.",
             "Consultar el registro de systemd del arranque actual.",
             "Consultare il registro di systemd dell’avvio corrente.",
+            "查看本次开机的系统日志和错误。",
+            "今回の起動に関するシステムログやエラーを表示する。",
+            "Bekijk systeemlogboeken en fouten van de huidige opstartsessie.",
+            "Wyświetl dziennik systemowy oraz błędy bieżącego uruchomienia.",
+            "Geçerli açılışın sistem günlüklerini ve hatalarını göster.",
         ],
         "command.network.addresses" => &[
             "Показать локальные IP-адреса и сетевые интерфейсы компьютера.",
@@ -158,6 +264,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Afficher les adresses IP locales et les interfaces réseau.",
             "Mostrar las direcciones IP locales y las interfaces de red.",
             "Mostrare gli indirizzi IP locali e le interfacce di rete.",
+            "显示网络接口和分配的 IPv4 或 IPv6 地址。",
+            "ネットワークインターフェースと割り当てられた IPv4 または IPv6 アドレスを表示する。",
+            "Toon netwerkinterfaces en toegewezen IPv4- of IPv6-adressen.",
+            "Pokaż interfejsy sieciowe i przypisane adresy IPv4 lub IPv6.",
+            "Ağ arayüzlerini ve atanmış IPv4 veya IPv6 adreslerini göster.",
         ],
         "command.network.ports" => &[
             "Показать открытые локальные порты TCP и UDP, которые слушают службы.",
@@ -165,6 +276,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Lister les ports TCP et UDP locaux sur lesquels des services sont à l’écoute.",
             "Listar los puertos TCP y UDP locales en los que escuchan servicios.",
             "Elencare le porte TCP e UDP locali su cui sono in ascolto i servizi.",
+            "查看监听中的 TCP 或 UDP 端口及相关进程。",
+            "待ち受け中の TCP・UDP ポートと対応するプロセスを確認する。",
+            "Toon luisterende TCP- of UDP-poorten en de bijbehorende processen.",
+            "Wyświetl nasłuchujące porty TCP lub UDP wraz z powiązanymi procesami.",
+            "Dinlenen TCP veya UDP bağlantı noktalarını ve ilgili işlemleri göster.",
         ],
         "command.help.manual" => &[
             "Открыть справочную страницу Linux и узнать синтаксис и параметры команды.",
@@ -172,6 +288,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Ouvrir la page de manuel d’une commande Linux pour consulter la syntaxe et les options.",
             "Abrir la página de manual de un comando de Linux para consultar la sintaxis y las opciones.",
             "Aprire la pagina di manuale di un comando Linux per consultarne sintassi e opzioni.",
+            "打开指定 Linux 命令的手册页，查看用法和选项。",
+            "Linux コマンドのマニュアルページを開き、使い方やオプションを確認する。",
+            "Open de manpagina van een Linux-commando en bekijk het gebruik en de opties.",
+            "Otwórz stronę podręcznika polecenia Linuksa, aby poznać składnię i opcje.",
+            "Bir Linux komutunun kullanımını ve seçeneklerini görmek için kılavuz sayfasını aç.",
         ],
         "command.packages.search" => &[
             "Поиск доступных пакетов в репозиториях по имени или ключевому слову.",
@@ -179,6 +300,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Rechercher des paquets disponibles dans les dépôts par nom ou par mot-clé.",
             "Buscar paquetes disponibles en los repositorios por nombre o palabra clave.",
             "Cercare pacchetti disponibili nei repository per nome o parola chiave.",
+            "在软件仓库中按名称或描述查找可用的软件包。",
+            "リポジトリから利用可能なソフトウェアパッケージを名前や説明で探す。",
+            "Zoek beschikbare softwarepakketten in de pakketbronnen op naam of beschrijving.",
+            "Wyszukaj dostępne pakiety oprogramowania w repozytoriach po nazwie lub opisie.",
+            "Depolardaki kullanılabilir yazılım paketlerini ada veya açıklamaya göre ara.",
         ],
         "command.packages.install" => &[
             "Установить новый пакет и его зависимости из репозиториев. Как установить программу?",
@@ -186,6 +312,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Installer un nouveau paquet et ses dépendances depuis les dépôts. Comment installer un logiciel ?",
             "Instalar un paquete nuevo y sus dependencias desde los repositorios. ¿Cómo instalo un programa?",
             "Installare un nuovo pacchetto e le sue dipendenze dai repository. Come installo un programma?",
+            "从软件仓库安装一个新的软件包及其依赖项。",
+            "リポジトリから新しいソフトウェアパッケージと依存関係をインストールする。",
+            "Installeer een nieuw softwarepakket en de afhankelijkheden uit de pakketbronnen.",
+            "Zainstaluj nowy pakiet oprogramowania i jego zależności z repozytorium.",
+            "Depodan yeni bir yazılım paketi ve bağımlılıklarını kur.",
         ],
         "command.packages.upgrade" => &[
             "Обновить операционную систему и установленные пакеты до доступных версий.",
@@ -193,6 +324,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Mettre à jour le système et appliquer les mises à jour disponibles aux paquets installés.",
             "Actualizar el sistema y aplicar las actualizaciones disponibles para los paquetes instalados.",
             "Aggiornare il sistema e applicare gli aggiornamenti disponibili ai pacchetti installati.",
+            "刷新软件包列表并升级已安装的软件包。",
+            "パッケージ一覧を更新し、インストール済みのパッケージをアップグレードする。",
+            "Vernieuw de pakketlijsten en werk geïnstalleerde pakketten bij.",
+            "Odśwież listę pakietów i zaktualizuj zainstalowane pakiety.",
+            "Paket listelerini yenile ve kurulu yazılım paketlerini güncelle.",
         ],
         "command.packages.list" => &[
             "Вывести список всех установленных в системе пакетов.",
@@ -200,6 +336,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Lister tous les paquets déjà installés sur le système.",
             "Listar todos los paquetes instalados en el sistema.",
             "Elencare tutti i pacchetti già installati nel sistema.",
+            "列出系统中已安装的软件包。",
+            "システムにインストール済みのソフトウェアパッケージを一覧表示する。",
+            "Toon de softwarepakketten die op het systeem zijn geïnstalleerd.",
+            "Wyświetl listę pakietów zainstalowanych w systemie.",
+            "Sistemde kurulu yazılım paketlerini listele.",
         ],
         "command.packages.details" => &[
             "Показать сведения об известном пакете, включая версию, описание и зависимости.",
@@ -207,6 +348,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Afficher la version, la description et les dépendances d’un paquet connu.",
             "Consultar la versión, la descripción y las dependencias de un paquete conocido.",
             "Mostrare la versione, la descrizione e le dipendenze di un pacchetto noto.",
+            "显示已知软件包的版本、描述和依赖项。",
+            "指定したパッケージのバージョン、説明、依存関係を表示する。",
+            "Toon de versie, beschrijving en afhankelijkheden van een bekend pakket.",
+            "Pokaż wersję, opis i zależności wskazanego pakietu.",
+            "Belirtilen paketin sürümünü, açıklamasını ve bağımlılıklarını göster.",
         ],
         "command.packages.owner" => &[
             "Узнать, какому установленному пакету принадлежит файл или программа.",
@@ -214,6 +360,11 @@ pub(crate) fn catalog_texts(id: &str) -> &'static [&'static str] {
             "Trouver le paquet installé auquel appartient un fichier ou un programme.",
             "Averiguar a qué paquete instalado pertenece un archivo o programa.",
             "Scoprire a quale pacchetto installato appartiene un file o un programma.",
+            "查找某个文件或程序属于哪个已安装的软件包。",
+            "ファイルやプログラムがどのインストール済みパッケージに含まれるかを調べる。",
+            "Zoek uit bij welk geïnstalleerd pakket een bestand of programma hoort.",
+            "Sprawdź, do którego zainstalowanego pakietu należy plik lub program.",
+            "Bir dosya veya programın hangi kurulu pakete ait olduğunu bul.",
         ],
         _ => &[],
     }
@@ -225,14 +376,14 @@ mod tests {
     use crate::{catalog::SETTINGS, commands::COMMANDS};
 
     #[test]
-    fn every_builtin_entry_has_five_translations() {
+    fn every_builtin_entry_has_all_additional_translations() {
         for id in SETTINGS
             .iter()
             .map(|setting| setting.id)
             .chain(COMMANDS.iter().map(|command| command.id))
         {
             let passages = catalog_texts(id);
-            assert_eq!(passages.len(), 5, "{id}");
+            assert_eq!(passages.len(), 10, "{id}");
             assert!(passages.iter().all(|text| !text.trim().is_empty()), "{id}");
         }
     }
