@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0
+
+- Keep Granite 97M as the default text encoder. Add **EmbeddingGemma 300M FP32 and INT8**, **GTE Multilingual Base FP32**, and **Qwen3 Embedding 0.6B INT8** as verified ONNX downloads and choices in the CLI and desktop app.
+- Use calibrated semantic similarity cutoffs for the built-in ONNX models. Save or reset a cutoff per model with `semfind config minimum-similarity`, or override it for a search with `--minimum-similarity`.
+- Use the more detailed Florence-2 Base FT prompt by default for image captions. The next caption-enabled scan refreshes existing captions.
+- Offer Florence-2 Large FT through **Manage index → Image model** or `semfind config caption-model florence-2-large`. Use `semfind reindex --refresh-images` to regenerate captions in registered folders.
+- Offer **EmbeddingGemma 2** as a single encoder for documents, applications, commands, settings, images, and text queries. It stores direct image vectors and shares one search model across result types. Its default cutoff of 0.68 applies to text.
+- Reread images in registered folders when reindexing to or from EmbeddingGemma 2. The new model and its vectors are saved in one transaction.
+- Let the downloader set up or reuse a user-local PyTorch runtime for image models. The CLI and desktop app report the actual PyTorch device, and the desktop app labels EmbeddingGemma 2 as a text and image model.
+
+See the [model guide](docs/models.md) for downloads, image model selection, and reindexing instructions.
+
 ## 0.3.6
 
 - Add **Switch Model** to the desktop app. Choose Granite 97M, Granite 311M, E5 Small, E5 Large, or a local custom ONNX model. Granite 97M remains the default for new indexes.

@@ -10,7 +10,9 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
+    fmt,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 /// Stable category names shared by clients.
@@ -37,6 +39,35 @@ impl Category {
     }
 }
 
+/// A search-time cosine cutoff, or an explicit request to disable it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SimilarityThreshold(Option<f32>);
+
+impl FromStr for SimilarityThreshold {
+    type Err = &'static str;
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        if value == "off" {
+            return Ok(Self(None));
+        }
+        value
+            .parse::<f32>()
+            .ok()
+            .filter(|score| (-1.0..=1.0).contains(score))
+            .map(|score| Self(Some(score)))
+            .ok_or("expected a cosine similarity between -1 and 1, or off")
+    }
+}
+
+impl fmt::Display for SimilarityThreshold {
+    fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Some(value) => write!(output, "{value}"),
+            None => output.write_str("off"),
+        }
+    }
+}
+
 /// Filters applied before ranking. The default limit is ten.
 #[derive(Debug, Clone)]
 pub struct SearchOptions {
@@ -48,6 +79,8 @@ pub struct SearchOptions {
     pub distro: Option<Distro>,
     /// Include locally installed manual pages and executable names.
     pub include_local_commands: bool,
+    /// Override the model's semantic cutoff, including for cached query vectors.
+    pub minimum_similarity: Option<SimilarityThreshold>,
     pub limit: usize,
 }
 
@@ -60,6 +93,7 @@ impl Default for SearchOptions {
             category: None,
             distro: None,
             include_local_commands: true,
+            minimum_similarity: None,
             limit: 10,
         }
     }
@@ -368,6 +402,7 @@ impl Index {
             .file_kind
             .or_else(|| extension.as_deref().and_then(FileKind::from_extension));
         if file_kind != Some(FileKind::Video) {
+            let direct_images = crate::index::direct_image_index(&tx)?;
             let mut encode = Some(encode);
             let mut query_embedding = None;
             let mut statement =
@@ -386,7 +421,22 @@ impl Index {
                     }
                 };
                 let score = similarity(&embedding.vector, bytes)?;
-                if embedding.minimum_similarity.is_none_or(|min| score >= min)
+                let default_minimum = if direct_images
+                    && candidate
+                        .hit
+                        .extension
+                        .as_deref()
+                        .and_then(FileKind::from_extension)
+                        == Some(FileKind::Image)
+                {
+                    None
+                } else {
+                    embedding.minimum_similarity
+                };
+                let minimum_similarity = options
+                    .minimum_similarity
+                    .map_or(default_minimum, |threshold| threshold.0);
+                if minimum_similarity.is_none_or(|min| score >= min)
                     && candidate
                         .vector_chunk
                         .is_none_or(|(prev, best)| score > best || (score == best && id < prev))

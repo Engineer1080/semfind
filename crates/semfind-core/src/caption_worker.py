@@ -13,7 +13,7 @@ import torch
 from PIL import Image, ImageOps
 from transformers import Florence2ForConditionalGeneration, Florence2Processor
 
-TASK = "<DETAILED_CAPTION>"
+TASK = "<MORE_DETAILED_CAPTION>"
 MAX_IMAGE_BYTES = 16 * 1024 * 1024
 MAX_IMAGE_PIXELS = 40_000_000
 

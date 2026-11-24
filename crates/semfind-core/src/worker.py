@@ -19,11 +19,23 @@ GPU_BACKENDS = {
 
 GRANITE_97_TOKENIZER = "4f2842d568e2724370aec203652a42ac783c7937f8347a1a2cc7506d71f1582f"
 GRANITE_311_TOKENIZER = "0087c868b33bad550a78a08d19798cfd7f713cde4f020803b8f51f405503e15f"
+E5_SMALL_TOKENIZER = "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39"
 E5_LARGE_TOKENIZER = "62c24cdc13d4c9952d63718d6c9fa4c287974249e16b7ade6d5a85e7bbb75626"
+EMBEDDINGGEMMA_TOKENIZER = "4dda02faaf32bc91031dc8c88457ac272b00c1016cc679757d1c441b248b9c47"
+EMBEDDINGGEMMA_RECIPE = "embeddinggemma-retrieval-v1"
+EMBEDDINGGEMMA_INT8_WEIGHTS = "172efde319fe1542dc41f31be6154910b05b78f7a861c265c4600eec906bd6d8"
+GTE_TOKENIZER = "3a56def25aa40facc030ea8b0b87f3688e4b3c39eb8b45d5702b3a1300fe2a20"
+GTE_RECIPE = "gte-cls-512-v1"
+QWEN_TOKENIZER = "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"
+QWEN_RECIPE = "qwen3-last-token-512-v1"
 BUILTIN_CUTOFFS = {
-    GRANITE_97_TOKENIZER: 0.86,
-    GRANITE_311_TOKENIZER: 0.88,
-    E5_LARGE_TOKENIZER: 0.80,
+    GRANITE_97_TOKENIZER: 0.80,
+    GRANITE_311_TOKENIZER: 0.82,
+    E5_SMALL_TOKENIZER: 0.80,
+    E5_LARGE_TOKENIZER: 0.78,
+    EMBEDDINGGEMMA_TOKENIZER: 0.30,
+    GTE_TOKENIZER: 0.58,
+    QWEN_TOKENIZER: 0.40,
 }
 
 
@@ -92,14 +104,11 @@ def main():
     ort.disable_telemetry_events()
     directory = Path(sys.argv[1])
     model, tokenizer_file = (directory / name for name in ("model.onnx", "tokenizer.json"))
-    artifacts = [model, tokenizer_file]
-    external_weights = directory / "model.onnx_data"
+    hashes = [artifact_hash(model), artifact_hash(tokenizer_file)]
+    sidecar = "model_quantized.onnx_data" if hashes[0] == EMBEDDINGGEMMA_INT8_WEIGHTS else "model.onnx_data"
+    external_weights = directory / sidecar
     if external_weights.is_file():
-        artifacts.append(external_weights)
-    hashes = []
-    for path in artifacts:
-        with path.open("rb") as stream:
-            hashes.append(hashlib.file_digest(stream, "sha256").hexdigest())
+        hashes.append(artifact_hash(external_weights))
     granite = hashes[1] in (GRANITE_97_TOKENIZER, GRANITE_311_TOKENIZER)
     recipe = "granite-r2-cls-512-v1" if granite else "e5-mean-pool-v1"
     cutoff = BUILTIN_CUTOFFS.get(hashes[1], 0.78)
@@ -108,6 +117,31 @@ def main():
         encoding, cutoff = custom_recipe(config)
         recipe = "custom-onnx-v1"
         hashes.append(hashlib.sha256(json.dumps(encoding, sort_keys=True).encode()).hexdigest())
+    elif hashes[1] == EMBEDDINGGEMMA_TOKENIZER:
+        recipe = EMBEDDINGGEMMA_RECIPE
+        encoding = {
+            "pooling": "sentence",
+            "output": "sentence_embedding",
+            "max_tokens": 2048,
+            "query_prefix": "task: search result | query: ",
+            "passage_prefix": "title: ",
+        }
+    elif hashes[1] == GTE_TOKENIZER:
+        recipe = GTE_RECIPE
+        encoding = {
+            "pooling": "sentence", "output": "sentence_embedding", "max_tokens": 512,
+            "query_prefix": "", "passage_prefix": "",
+        }
+    elif hashes[1] == QWEN_TOKENIZER:
+        recipe = QWEN_RECIPE
+        encoding = {
+            "pooling": "last", "output": "last_hidden_state", "max_tokens": 512,
+            "query_prefix": (
+                "Instruct: Given a web search query, retrieve relevant passages "
+                "that answer the query\nQuery: "
+            ),
+            "passage_prefix": "",
+        }
     else:
         encoding = {
             "pooling": "cls" if granite else "mean",
@@ -136,7 +170,10 @@ def main():
     provider = session.get_providers()[0]
     tokenizer = Tokenizer.from_file(str(tokenizer_file))
     tokenizer.enable_truncation(max_length=encoding["max_tokens"])
-    if recipe == "e5-mean-pool-v1":
+    if recipe == QWEN_RECIPE:
+        pad_token = "<|endoftext|>"
+        tokenizer.enable_padding(direction="left", pad_id=tokenizer.token_to_id(pad_token), pad_token=pad_token)
+    elif recipe in ("e5-mean-pool-v1", EMBEDDINGGEMMA_RECIPE, GTE_RECIPE):
         tokenizer.enable_padding(pad_id=tokenizer.token_to_id("<pad>"), pad_token="<pad>")
     elif tokenizer.padding is None:
         raise ValueError("tokenizer.json must define batch padding")
@@ -154,8 +191,11 @@ def main():
     }))
     pooling = encoding["pooling"]
     for line in sys.stdin:
-        prefix, texts = json.loads(line)
-        prefix = encoding["query_prefix" if prefix == "query: " else "passage_prefix"]
+        kind, texts = json.loads(line)
+        prefix = encoding["query_prefix" if kind == "query: " else "passage_prefix"]
+        if recipe == EMBEDDINGGEMMA_RECIPE and kind != "query: ":
+            # The index sends the title and passage separated by a newline.
+            texts = [text.replace("\n", " | text: ", 1) for text in texts]
         batch = tokenizer.encode_batch([prefix + text for text in texts])
         columns = {
             "input_ids": np.asarray([row.ids for row in batch], dtype=np.int64),
@@ -174,11 +214,13 @@ def main():
             provider = CPU_PROVIDER
             hidden, = session.run([output], feeds)
         if pooling != "sentence" and hidden.ndim != 3:
-            raise ValueError("cls and mean pooling require an ONNX output shaped [batch, tokens, dimensions]")
+            raise ValueError("Token pooling requires an ONNX output shaped [batch, tokens, dimensions]")
         if pooling == "sentence":
             pooled = hidden
         elif pooling == "cls":
             pooled = hidden[:, 0, :]
+        elif pooling == "last":
+            pooled = hidden[:, -1, :]
         else:
             mask = columns["attention_mask"][:, :, None]
             pooled = (hidden * mask).sum(axis=1) / mask.sum(axis=1)
@@ -188,6 +230,11 @@ def main():
             "vectors": pooled.tolist(),
             "uses_cpu": provider == CPU_PROVIDER,
         }, allow_nan=False))
+
+
+def artifact_hash(path):
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 if __name__ == "__main__":

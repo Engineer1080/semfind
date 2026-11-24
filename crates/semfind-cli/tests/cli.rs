@@ -188,6 +188,80 @@ fn config_saves_shows_and_resets_the_timeout_without_opening_the_index() -> Resu
 }
 
 #[test]
+fn caption_model_can_be_saved_and_overridden_without_changing_the_embedding_model() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let index = temp.path().join("index");
+    let config = || {
+        let mut command = cli(&index);
+        command.args(["config", "caption-model"]);
+        command
+    };
+    assert_eq!(success(config().output()?)?, b"florence-2\n");
+    assert_eq!(
+        success(config().arg("florence-2-large").output()?)?,
+        b"florence-2-large\n"
+    );
+    assert_eq!(success(config().output()?)?, b"florence-2-large\n");
+    assert!(!index.exists());
+
+    let status: serde_json::Value = serde_json::from_slice(&success(
+        cli(&index)
+            .args(["--caption-model", "florence-2", "status", "--json"])
+            .output()?,
+    )?)?;
+    assert_eq!(status["caption_model"], "florence-2");
+    assert_eq!(status["model_name"], "Granite 97M Multilingual R2");
+    assert_eq!(status["direct_images"], false);
+    Ok(())
+}
+
+#[test]
+fn semantic_threshold_is_saved_per_builtin_model_and_can_be_reset() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let index = temp.path().join("index");
+    let config = |model| {
+        let mut command = cli(&index);
+        command.env_remove("SEMFIND_MODEL_DIR").args([
+            "config",
+            "minimum-similarity",
+            "--model",
+            model,
+        ]);
+        command
+    };
+    assert_eq!(success(config("granite-97m").output()?)?, b"default\n");
+    assert_eq!(
+        success(config("granite-97m").arg("0.72").output()?)?,
+        b"0.72\n"
+    );
+    assert_eq!(
+        success(config("gte-multilingual-base").arg("off").output()?)?,
+        b"off\n"
+    );
+    assert_eq!(success(config("granite-97m").output()?)?, b"0.72\n");
+    assert_eq!(
+        success(config("granite-97m").arg("--reset").output()?)?,
+        b"default\n"
+    );
+    assert_eq!(
+        success(config("gte-multilingual-base").output()?)?,
+        b"off\n"
+    );
+    for value in ["NaN", "inf", "1.01", "-1.01"] {
+        assert_eq!(
+            config("granite-97m").arg(value).output()?.status.code(),
+            Some(2)
+        );
+    }
+    assert_eq!(
+        success(config("granite-97m").arg("-0.5").output()?)?,
+        b"-0.5\n"
+    );
+    assert!(!index.exists());
+    Ok(())
+}
+
+#[test]
 fn search_time_is_opt_in_and_preserves_json() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let index = temp.path().join("index");

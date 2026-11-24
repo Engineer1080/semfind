@@ -194,6 +194,18 @@ impl Index {
         directory: &Path,
         model: &mut impl Embedder,
     ) -> Result<usize> {
+        self.rebuild_embeddings_with_images(directory, model, None, false)
+    }
+
+    /// Rebuild vectors, rereading images when entering or leaving direct image encoding.
+    /// An explicit image refresh reapplies the selected image recipe to all registered folders.
+    pub fn rebuild_embeddings_with_images(
+        &mut self,
+        directory: &Path,
+        model: &mut impl Embedder,
+        captioner: Option<&mut dyn ImageCaptioner>,
+        refresh_images: bool,
+    ) -> Result<usize> {
         ensure!(!model.identity().is_empty(), "model identity is empty");
         ensure!(directory.is_absolute(), "model directory must be absolute");
         let directory = directory
@@ -202,6 +214,24 @@ impl Index {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let direct = model.supports_images();
+        let reread_images = refresh_images || direct || direct_image_index(&tx)?;
+        if reread_images {
+            let mut images =
+                tx.prepare("SELECT id, extension FROM sources WHERE category = 'file'")?;
+            let ids = images
+                .query_map([], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            let mut remove = tx.prepare("DELETE FROM sources WHERE id = ?1")?;
+            for (id, extension) in ids {
+                if extension.as_deref().and_then(FileKind::from_extension) == Some(FileKind::Image)
+                {
+                    remove.execute([id])?;
+                }
+            }
+        }
         tx.execute("DELETE FROM metadata WHERE key = 'dimensions'", [])?;
         let mut written = 0;
         {
@@ -233,6 +263,44 @@ impl Index {
                 }
             }
         }
+        if reread_images {
+            let roots = tx
+                .prepare("SELECT path, exclusions FROM roots ORDER BY path")?
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            let mut images = ImageScan {
+                captions: captioner.map(|captioner| CaptionScan {
+                    captioner,
+                    required: true,
+                }),
+                direct,
+                only: true,
+            };
+            let mut report = IndexReport::default();
+            for (path, exclusions) in roots {
+                let root = files::root(Path::new(&path))
+                    .with_context(|| format!("refresh images in indexed directory {path}"))?;
+                let exclusions: Vec<PathBuf> = serde_json::from_str(&exclusions)?;
+                synchronize_files(
+                    &tx,
+                    &root,
+                    &exclusions,
+                    model,
+                    &mut images,
+                    &mut report,
+                    &mut || {},
+                )?;
+            }
+            let indexed = tx.query_row(
+                "SELECT COUNT(*) FROM chunks WHERE length(embedding) > 0",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?;
+            written = usize::try_from(indexed)?;
+        }
+        save_image_recipe(&tx, direct)?;
         tx.execute(
             "INSERT OR REPLACE INTO metadata VALUES ('model', ?1), ('model_directory', ?2)",
             params![model.identity(), directory],
@@ -429,6 +497,8 @@ impl Index {
             "INSERT OR IGNORE INTO metadata VALUES ('model', ?1)",
             [model.identity()],
         )?;
+        let direct_images = model.supports_images();
+        save_image_recipe(&tx, direct_images)?;
         progress(InitProgress::Catalogs);
         synchronize_catalog(&tx, model, &mut report)?;
         synchronize_commands(&tx, model, &mut report)?;
@@ -464,10 +534,14 @@ impl Index {
                     })?);
                 }
             }
-            let mut captions = captions.map(|captioner| CaptionScan {
-                captioner,
-                required: !initializing || force,
-            });
+            let mut images = ImageScan {
+                captions: captions.map(|captioner| CaptionScan {
+                    captioner,
+                    required: !initializing || force,
+                }),
+                direct: direct_images,
+                only: false,
+            };
             progress(InitProgress::Files(0));
             let mut discovered = 0;
             let mut report_file = || {
@@ -488,7 +562,7 @@ impl Index {
                     &directory,
                     &exclusions,
                     model,
-                    &mut captions,
+                    &mut images,
                     &mut report,
                     &mut report_file,
                 )?;
@@ -586,6 +660,21 @@ pub(crate) fn check_model(conn: &Connection, model: &impl Embedder) -> Result<()
     Ok(())
 }
 
+pub(crate) fn direct_image_index(conn: &Connection) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM metadata WHERE key = 'direct_images' AND value = '1')",
+        [],
+        |row| row.get(0),
+    )
+}
+
+fn save_image_recipe(conn: &Connection, direct: bool) -> rusqlite::Result<usize> {
+    conn.execute(
+        "INSERT OR REPLACE INTO metadata VALUES ('direct_images', ?1)",
+        [if direct { "1" } else { "0" }],
+    )
+}
+
 pub(crate) fn model_identity(conn: &Connection) -> Result<Option<String>> {
     Ok(conn
         .query_row(
@@ -635,6 +724,26 @@ fn write_source<'a>(
     digest: &[u8],
     model: &mut impl Embedder,
 ) -> Result<i64> {
+    let id = replace_source(tx, &source, digest)?;
+    let Some(passages) = passages else {
+        store_chunk(tx, id, &source, &Passage::unlocated(""), &[])?;
+        return Ok(id);
+    };
+    let mut parts = passages.peekable();
+    if parts.peek().is_none() {
+        write_chunks(tx, id, &source, &[Passage::unlocated("")], model)?;
+    }
+    loop {
+        let batch: Vec<_> = parts.by_ref().take(8).collect();
+        if batch.is_empty() {
+            break;
+        }
+        write_chunks(tx, id, &source, &batch, model)?;
+    }
+    Ok(id)
+}
+
+fn replace_source(tx: &Transaction<'_>, source: &Source<'_>, digest: &[u8]) -> Result<i64> {
     let id: i64 = tx.query_row(
         "INSERT INTO sources(key,category,title,root,extension,desktop,setting_group,digest,command_distro,command_example)
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
@@ -656,21 +765,6 @@ fn write_source<'a>(
         |row| row.get(0),
     )?;
     tx.execute("DELETE FROM chunks WHERE source = ?1", [id])?;
-    let Some(passages) = passages else {
-        store_chunk(tx, id, &source, &Passage::unlocated(""), &[])?;
-        return Ok(id);
-    };
-    let mut parts = passages.peekable();
-    if parts.peek().is_none() {
-        write_chunks(tx, id, &source, &[Passage::unlocated("")], model)?;
-    }
-    loop {
-        let batch: Vec<_> = parts.by_ref().take(8).collect();
-        if batch.is_empty() {
-            break;
-        }
-        write_chunks(tx, id, &source, &batch, model)?;
-    }
     Ok(id)
 }
 
@@ -708,26 +802,29 @@ fn encode_passages(
         vectors.len() == input.len(),
         "unexpected number of embeddings"
     );
-    let mut embeddings = Vec::with_capacity(input.len());
-    for vector in vectors {
-        let vector = normalized(vector)?;
-        let width = vector.len();
-        tx.execute(
-            "INSERT OR IGNORE INTO metadata VALUES ('dimensions', ?1)",
-            [width.to_string()],
-        )?;
-        let declared: String = tx.query_row(
-            "SELECT value FROM metadata WHERE key='dimensions'",
-            [],
-            |row| row.get(0),
-        )?;
-        ensure!(
-            declared.parse::<usize>()? == width,
-            "inconsistent embedding dimensions"
-        );
-        embeddings.push(vector.into_iter().flat_map(f32::to_le_bytes).collect());
-    }
-    Ok(embeddings)
+    vectors
+        .into_iter()
+        .map(|vector| encode_vector(tx, vector))
+        .collect()
+}
+
+fn encode_vector(tx: &Transaction<'_>, vector: Vec<f32>) -> Result<Vec<u8>> {
+    let vector = normalized(vector)?;
+    let width = vector.len();
+    tx.execute(
+        "INSERT OR IGNORE INTO metadata VALUES ('dimensions', ?1)",
+        [width.to_string()],
+    )?;
+    let declared: String = tx.query_row(
+        "SELECT value FROM metadata WHERE key='dimensions'",
+        [],
+        |row| row.get(0),
+    )?;
+    ensure!(
+        declared.parse::<usize>()? == width,
+        "inconsistent embedding dimensions"
+    );
+    Ok(vector.into_iter().flat_map(f32::to_le_bytes).collect())
 }
 
 fn store_chunk(
@@ -966,12 +1063,18 @@ struct CaptionScan<'a> {
     required: bool,
 }
 
+struct ImageScan<'a> {
+    captions: Option<CaptionScan<'a>>,
+    direct: bool,
+    only: bool,
+}
+
 fn synchronize_files(
     tx: &Transaction<'_>,
     root: &Path,
     exclusions: &[PathBuf],
     model: &mut impl Embedder,
-    captions: &mut Option<CaptionScan<'_>>,
+    images: &mut ImageScan<'_>,
     report: &mut IndexReport,
     report_file: &mut dyn FnMut(),
 ) -> Result<()> {
@@ -1015,6 +1118,9 @@ fn synchronize_files(
         let Some(kind) = FileKind::from_extension(&extension) else {
             continue;
         };
+        if images.only && kind != FileKind::Image {
+            continue;
+        }
         report_file();
         let key = path.to_str().context("file paths must be valid UTF-8")?;
         let title = entry
@@ -1028,10 +1134,13 @@ fn synchronize_files(
                 continue;
             }
         };
-        let caption_scan = captions
+        let image_supported = images::supports_caption(&extension);
+        let direct = image_supported && images.direct;
+        let caption_scan = images
+            .captions
             .as_mut()
-            .filter(|_| images::supports_caption(&extension));
-        let bytes = if kind == FileKind::Text || caption_scan.is_some() {
+            .filter(|_| image_supported && !direct);
+        let bytes = if kind == FileKind::Text || direct || caption_scan.is_some() {
             match files::read(file) {
                 Ok(bytes) => Some(bytes),
                 Err(error) => {
@@ -1046,6 +1155,10 @@ fn synchronize_files(
             None
         };
         let mut digest = match (&bytes, &caption_scan) {
+            (Some(bytes), _) if direct => Sha256::new()
+                .chain_update(b"image-vector-v1\0")
+                .chain_update(bytes)
+                .finalize(),
             (Some(bytes), Some(scan)) => Sha256::new()
                 .chain_update(b"image-caption-v1\0")
                 .chain_update(scan.captioner.identity())
@@ -1059,7 +1172,18 @@ fn synchronize_files(
             (None, _) => Sha256::digest(b"file-name-v1"),
         };
         // A filename-only scan must preserve previously indexed captions.
-        let preserve_caption = kind == FileKind::Image && caption_scan.is_none();
+        let preserve_caption = kind == FileKind::Image && !direct && caption_scan.is_none();
+        let source = Source {
+            key,
+            category: "file",
+            title,
+            root: Some(root_name),
+            extension: Some(&extension),
+            desktop: None,
+            setting_group: None,
+            distro: None,
+            example: None,
+        };
         let stored = source_state(tx, key)?;
         let id = if let Some((id, _)) = stored
             .as_ref()
@@ -1067,6 +1191,29 @@ fn synchronize_files(
         {
             report.unchanged += 1;
             *id
+        } else if direct {
+            let embedding = if let Some(bytes) = bytes {
+                match model
+                    .encode_image(&bytes)
+                    .with_context(|| format!("encode {}", path.display()))?
+                {
+                    Some(vector) => encode_vector(tx, vector)?,
+                    None => {
+                        warn(
+                            report,
+                            path,
+                            &anyhow::anyhow!("image could not be decoded; indexed filename"),
+                        );
+                        Vec::new()
+                    }
+                }
+            } else {
+                Vec::new()
+            };
+            let id = replace_source(tx, &source, &digest)?;
+            store_chunk(tx, id, &source, &Passage::unlocated(""), &embedding)?;
+            report.written += 1;
+            id
         } else {
             let text = match (bytes, caption_scan) {
                 (Some(bytes), Some(scan)) => match scan.captioner.caption(&bytes) {
@@ -1091,7 +1238,7 @@ fn synchronize_files(
                             &error
                                 .context("Florence-2 unavailable. Continuing without new captions"),
                         );
-                        *captions = None;
+                        images.captions = None;
                         if let Some((id, _)) = stored {
                             report.unchanged += 1;
                             tx.execute("INSERT INTO seen VALUES (?1)", [id])?;
@@ -1112,17 +1259,7 @@ fn synchronize_files(
             };
             let id = write_source(
                 tx,
-                Source {
-                    key,
-                    category: "file",
-                    title,
-                    root: Some(root_name),
-                    extension: Some(&extension),
-                    desktop: None,
-                    setting_group: None,
-                    distro: None,
-                    example: None,
-                },
+                source,
                 text.as_deref().map(|text| {
                     files::file_passages(text, extension == "pdf").map(|mut passage| {
                         if kind == FileKind::Image {
@@ -1139,10 +1276,12 @@ fn synchronize_files(
         };
         tx.execute("INSERT INTO seen VALUES (?1)", [id])?;
     }
-    report.removed += tx.execute(
-        "DELETE FROM sources WHERE root = ?1 AND id NOT IN (SELECT id FROM seen)",
-        [root_name],
-    )?;
+    if !images.only {
+        report.removed += tx.execute(
+            "DELETE FROM sources WHERE root = ?1 AND id NOT IN (SELECT id FROM seen)",
+            [root_name],
+        )?;
+    }
     Ok(())
 }
 

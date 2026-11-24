@@ -23,12 +23,22 @@ pub trait Embedder {
         None
     }
 
+    /// Whether this encoder accepts image bytes in the same space as text.
+    fn supports_images(&self) -> bool {
+        false
+    }
+
+    /// Encode a supported image, or return None for an unreadable image.
+    fn encode_image(&mut self, _image: &[u8]) -> Result<Option<Vec<f32>>> {
+        bail!("this embedding model cannot encode images")
+    }
+
     /// Encode a batch in a shared vector space.
     fn encode(&mut self, kind: InputKind, texts: &[String]) -> Result<Vec<Vec<f32>>>;
 }
 
 /// Execution backend for the local ONNX worker.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ExecutionDevice {
     /// Prefer CUDA, then MIGraphX, then the CPU.
     #[default]
@@ -41,13 +51,25 @@ pub enum ExecutionDevice {
     Migraphx,
 }
 
-/// ONNX encoder through a local Python worker.
+const GEMMA_FILES: &[(&str, bool)] = &[
+    ("model.safetensors", true),
+    ("tokenizer.json", true),
+    ("config.json", true),
+    ("processor_config.json", true),
+    ("preprocessor_config.json", true),
+    ("tokenizer_config.json", true),
+    ("tokenizer.model", true),
+    ("chat_template.jinja", true),
+];
+
+/// Local encoder through a Python worker.
 pub struct LocalModel {
     worker: PythonWorker,
     identity: String,
     minimum_similarity: Option<f32>,
     initial_provider: String,
     uses_cpu: bool,
+    direct_images: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -100,12 +122,35 @@ impl LocalModel {
         Self::start_worker(python, directory, device)
     }
 
+    /// Whether the checkpoint uses the PyTorch multimodal worker.
+    pub fn is_multimodal_checkpoint(directory: &Path) -> bool {
+        directory.join("model.safetensors").is_file() && !directory.join("model.onnx").is_file()
+    }
+
     fn start_worker(python: &Path, directory: &Path, device: &str) -> Result<Self> {
-        let mut worker = PythonWorker::start(
-            python,
-            include_str!("worker.py"),
-            &[directory.as_os_str(), OsStr::new(device)],
-        )?;
+        let direct_images = Self::is_multimodal_checkpoint(directory);
+        let script = if direct_images {
+            for (name, _) in GEMMA_FILES {
+                ensure!(
+                    directory.join(name).is_file(),
+                    "missing EmbeddingGemma 2 artifact {}",
+                    directory.join(name).display()
+                );
+            }
+            include_str!("gemma2_worker.py")
+        } else {
+            include_str!("worker.py")
+        };
+        // PyTorch uses ROCm directly, whereas ONNX uses the MIGraphX provider.
+        let mapped;
+        let device = if direct_images && device.starts_with("migraphx") {
+            mapped = device.replacen("migraphx", "rocm", 1);
+            &mapped
+        } else {
+            device
+        };
+        let mut worker =
+            PythonWorker::start(python, script, &[directory.as_os_str(), OsStr::new(device)])?;
         let ready: WorkerReady = worker
             .receive()
             .context("load the local model (see README setup)")?;
@@ -122,7 +167,11 @@ impl LocalModel {
             worker,
             identity,
             minimum_similarity,
-            uses_cpu: initial_provider == "CPUExecutionProvider",
+            uses_cpu: matches!(
+                initial_provider.as_str(),
+                "CPUExecutionProvider" | "TorchCPUProvider"
+            ),
+            direct_images,
             initial_provider,
         })
     }
@@ -184,6 +233,28 @@ impl Embedder for LocalModel {
         self.minimum_similarity
     }
 
+    fn supports_images(&self) -> bool {
+        self.direct_images
+    }
+
+    fn encode_image(&mut self, image: &[u8]) -> Result<Option<Vec<f32>>> {
+        ensure!(
+            self.direct_images,
+            "this embedding model cannot encode images"
+        );
+        serde_json::to_writer(&mut self.worker.input, &("image", image.len()))?;
+        self.worker.input.write_all(b"\n")?;
+        self.worker.input.write_all(image)?;
+        self.worker.input.flush()?;
+        let mut result: WorkerEmbeddings = self.worker.receive().context("encode image")?;
+        self.uses_cpu = result.uses_cpu;
+        ensure!(
+            result.vectors.len() <= 1,
+            "unexpected number of image embeddings"
+        );
+        Ok(result.vectors.pop())
+    }
+
     fn encode(&mut self, kind: InputKind, texts: &[String]) -> Result<Vec<Vec<f32>>> {
         let prefix = match kind {
             InputKind::Query => "query: ",
@@ -229,13 +300,20 @@ pub fn local_model_revision(directory: &Path) -> Option<[u8; 32]> {
     use std::{fs, io, os::linux::fs::MetadataExt};
 
     let mut hash = Sha256::new();
-    hash.update(include_bytes!("worker.py"));
-    for (name, required) in [
-        ("model.onnx", true),
-        ("tokenizer.json", true),
-        ("model.onnx_data", false),
-        ("semfind-model.json", false),
-    ] {
+    let files = if LocalModel::is_multimodal_checkpoint(directory) {
+        hash.update(include_bytes!("gemma2_worker.py"));
+        GEMMA_FILES
+    } else {
+        hash.update(include_bytes!("worker.py"));
+        &[
+            ("model.onnx", true),
+            ("tokenizer.json", true),
+            ("model.onnx_data", false),
+            ("model_quantized.onnx_data", false),
+            ("semfind-model.json", false),
+        ]
+    };
+    for &(name, required) in files {
         let metadata = match fs::metadata(directory.join(name)) {
             Ok(metadata) if metadata.is_file() => metadata,
             Err(error) if !required && error.kind() == io::ErrorKind::NotFound => {

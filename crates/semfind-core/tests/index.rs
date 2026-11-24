@@ -184,6 +184,129 @@ fn switching_models_keeps_saved_content_and_rolls_back_partial_rebuilds() -> Res
 }
 
 #[test]
+fn direct_images_share_search_and_are_rebuilt_from_the_source_when_switching() -> Result<()> {
+    struct DirectEncoder {
+        text: FixtureModel,
+        images: usize,
+        fail: bool,
+    }
+
+    impl Embedder for DirectEncoder {
+        fn identity(&self) -> &str {
+            "test-direct-images"
+        }
+
+        fn minimum_similarity(&self) -> Option<f32> {
+            self.text.minimum_similarity()
+        }
+
+        fn supports_images(&self) -> bool {
+            true
+        }
+
+        fn encode_image(&mut self, image: &[u8]) -> Result<Option<Vec<f32>>> {
+            self.images += 1;
+            if self.fail {
+                bail!("image inference failed");
+            }
+            Ok((image == b"kitchen").then(|| vec![0.6, 0.8, 0.0]))
+        }
+
+        fn encode(&mut self, kind: InputKind, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+            self.text.encode(kind, texts)
+        }
+    }
+
+    let (temp, mut index, root, mut original) = new_fixture()?;
+    let notes = fixture(&root, "notes.md", "Cold storage keeps samples fresh.")?;
+    let picture = fixture(&root, "asset.jpg", "kitchen")?;
+    let corrupt = fixture(&root, "corrupt.png", "invalid bytes")?;
+    let ignored = fixture(&root, "video.webm", "metadata only")?;
+    let scoped = SearchOptions {
+        path: Some(root.clone()),
+        ..Default::default()
+    };
+    let mut captions = FixtureCaptioner {
+        revision: "caption-v1",
+        calls: 0,
+    };
+    index.synchronize_with_image_captions(
+        &root,
+        &Default::default(),
+        None,
+        &mut original,
+        &mut captions,
+    )?;
+    let saved = index.status()?;
+    let mut direct = DirectEncoder {
+        text: FixtureModel {
+            identity: "direct-text",
+            passages: 0,
+            fail: false,
+        },
+        images: 0,
+        fail: true,
+    };
+    let directory = temp.path().join("model");
+    assert!(index.rebuild_embeddings(&directory, &mut direct).is_err());
+    assert_eq!(index.embedding_model()?, saved.model);
+    assert_eq!(index.embedding_model_directory()?, None);
+    assert!(
+        index
+            .search("cold storage", &scoped, &mut original)?
+            .iter()
+            .any(|hit| hit.path.as_ref() == Some(&picture) && hit.snippet.contains("refrigerator"))
+    );
+
+    direct.fail = false;
+    index.rebuild_embeddings(&directory, &mut direct)?;
+    let hits = index.search("cold storage", &scoped, &mut direct)?;
+    assert!(hits.iter().any(|hit| hit.path.as_ref() == Some(&notes)));
+    assert!(
+        hits.iter()
+            .any(|hit| hit.path.as_ref() == Some(&picture) && hit.snippet.is_empty())
+    );
+    assert_eq!(hits.len(), 2);
+    let strict = SearchOptions {
+        minimum_similarity: Some("0.78".parse().unwrap()),
+        ..scoped.clone()
+    };
+    assert_eq!(index.search("cold storage", &strict, &mut direct)?.len(), 1);
+    assert_eq!(
+        index.search("corrupt.png", &scoped, &mut direct)?[0]
+            .path
+            .as_ref(),
+        Some(&corrupt)
+    );
+    assert_eq!(
+        index.search("video.webm", &scoped, &mut direct)?[0]
+            .path
+            .as_ref(),
+        Some(&ignored)
+    );
+
+    let calls = direct.images;
+    index.synchronize(Some(&root), &Default::default(), &mut direct)?;
+    assert_eq!(direct.images, calls);
+    fixture(&root, "asset.jpg", "invalid bytes")?;
+    index.synchronize(Some(&root), &Default::default(), &mut direct)?;
+    assert_eq!(direct.images, calls + 1);
+    assert_eq!(index.search("cold storage", &scoped, &mut direct)?.len(), 1);
+
+    fixture(&root, "asset.jpg", "kitchen")?;
+    index.rebuild_embeddings_with_images(&directory, &mut original, Some(&mut captions), false)?;
+    assert_eq!(index.embedding_model()?, saved.model);
+    assert_eq!(index.status()?.roots, saved.roots);
+    assert!(
+        index
+            .search("cold storage", &scoped, &mut original)?
+            .iter()
+            .any(|hit| hit.path.as_ref() == Some(&picture) && hit.snippet.contains("refrigerator"))
+    );
+    Ok(())
+}
+
+#[test]
 fn image_captions_share_document_search_and_refresh_incrementally() -> Result<()> {
     let (_temp, mut index, root, mut model) = new_fixture()?;
     let picture = fixture(&root, "0001.jpg", "kitchen")?;
@@ -288,6 +411,7 @@ fn image_captions_share_document_search_and_refresh_incrementally() -> Result<()
 fn persisted_query_embedding_skips_model_start_and_ranks_current_files() -> Result<()> {
     let (temp, mut index, root, mut model) = new_fixture()?;
     let original = fixture(&root, "cold.md", "Cold storage keeps samples fresh.")?;
+    let garden = fixture(&root, "garden.md", "There is a bench in the garden.")?;
     let index_dir = temp.path().join("index");
     let model_dir = temp.path().join("model");
     fs::create_dir(&model_dir)?;
@@ -326,6 +450,27 @@ fn persisted_query_embedding_skips_model_start_and_ranks_current_files() -> Resu
     let (hits, reused) = search_cached(&index)?;
     assert!(reused);
     assert_eq!(hits[0].path.as_ref(), Some(&original));
+    assert!(hits.iter().all(|hit| hit.path.as_ref() != Some(&garden)));
+
+    let overridden = SearchOptions {
+        minimum_similarity: Some("off".parse().unwrap()),
+        ..options.clone()
+    };
+    let (hits, reused) = index.search_with_cached_query::<FixtureModel>(
+        query,
+        &overridden,
+        &model_dir,
+        &mut None,
+        || bail!("changing the threshold must reuse the cached vector"),
+    )?;
+    assert!(reused);
+    assert!(hits.iter().any(|hit| hit.path.as_ref() == Some(&garden)));
+    assert!(
+        search_cached(&index)?
+            .0
+            .iter()
+            .all(|hit| hit.path.as_ref() != Some(&garden))
+    );
 
     let replacement = fixture(&root, "new.md", "The refrigerator supports cold storage.")?;
     index.synchronize(Some(&root), &IndexOptions::default(), &mut model)?;

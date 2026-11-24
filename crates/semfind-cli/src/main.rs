@@ -2,7 +2,8 @@ use anyhow::{Context, Result, ensure};
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum, parser::ValueSource};
 use semfind_core::{
     Category, Distro, Embedder, ExecutionDevice, FileKind, FlorenceCaptioner, HitLocation, Index,
-    IndexOptions, IndexReport, InputKind, Language, LocalModel, SearchOptions, Status,
+    IndexOptions, IndexReport, InputKind, Language, LocalModel, SearchOptions, SimilarityThreshold,
+    Status,
 };
 mod config;
 mod distro;
@@ -30,7 +31,7 @@ const DEFAULT_DAEMON_IDLE_SECONDS: NonZeroU32 = NonZeroU32::new(15 * 60).unwrap(
 struct Cli {
     #[arg(long, env = "SEMFIND_INDEX_DIR", global = true)]
     index_dir: Option<PathBuf>,
-    /// Directory containing a local ONNX model and tokenizer.
+    /// Directory containing a local embedding model checkpoint.
     #[arg(
         long,
         env = "SEMFIND_MODEL_DIR",
@@ -41,6 +42,9 @@ struct Cli {
     /// Directory containing the local Florence-2 checkpoint.
     #[arg(long, env = "SEMFIND_CAPTION_MODEL_DIR", global = true)]
     caption_model_dir: Option<PathBuf>,
+    /// Select a Florence-2 checkpoint for image captions.
+    #[arg(long, env = "SEMFIND_CAPTION_MODEL", value_enum, global = true)]
+    caption_model: Option<CaptionChoice>,
     /// Select an embedding model. New indexes default to Granite 97M.
     #[arg(long, env = "SEMFIND_MODEL", value_enum, global = true)]
     model: Option<ModelChoice>,
@@ -92,6 +96,15 @@ enum ModelChoice {
     Granite97M,
     #[value(name = "granite-311m")]
     Granite311M,
+    #[value(name = "embeddinggemma-300m")]
+    EmbeddingGemma300M,
+    #[value(name = "embeddinggemma-300m-int8")]
+    EmbeddingGemma300MInt8,
+    #[value(name = "embeddinggemma-2")]
+    EmbeddingGemma2,
+    GteMultilingualBase,
+    #[value(name = "qwen3-embedding-0.6b-int8")]
+    Qwen3Embedding06BInt8,
 }
 
 impl ModelChoice {
@@ -101,6 +114,11 @@ impl ModelChoice {
             Self::E5Large => "E5 Large",
             Self::Granite97M => "Granite 97M Multilingual R2",
             Self::Granite311M => "Granite 311M Multilingual R2",
+            Self::EmbeddingGemma300M => "EmbeddingGemma 300M",
+            Self::EmbeddingGemma300MInt8 => "EmbeddingGemma 300M (INT8)",
+            Self::EmbeddingGemma2 => "EmbeddingGemma 2",
+            Self::GteMultilingualBase => "GTE Multilingual Base (FP32)",
+            Self::Qwen3Embedding06BInt8 => "Qwen3 Embedding 0.6B (INT8)",
         }
     }
 
@@ -110,17 +128,24 @@ impl ModelChoice {
             Self::E5Large => "e5-large",
             Self::Granite97M => "granite-97m-r2",
             Self::Granite311M => "granite-311m-r2",
+            Self::EmbeddingGemma300M => "embeddinggemma-300m",
+            Self::EmbeddingGemma300MInt8 => "embeddinggemma-300m-int8",
+            Self::EmbeddingGemma2 => "embeddinggemma-2",
+            Self::GteMultilingualBase => "gte-multilingual-base",
+            Self::Qwen3Embedding06BInt8 => "qwen3-embedding-0.6b-int8",
         }
     }
 
     fn from_identity(identity: &str) -> Option<Self> {
         let mut parts = identity.split(':');
         let recipe = parts.next();
-        let tokenizer = parts.nth(1);
+        let weights = parts.next();
+        let tokenizer = parts.next();
         match (recipe, tokenizer) {
+            (Some("embeddinggemma2-multimodal-v1"), _) => Some(Self::EmbeddingGemma2),
             (
                 Some("e5-mean-pool-v1"),
-                Some("62c24cdc13d4c9952d63718d6c9fa4c287974249e16b7ade6b5d85e7bbb75626"),
+                Some("62c24cdc13d4c9952d63718d6c9fa4c287974249e16b7ade6d5a85e7bbb75626"),
             ) => Some(Self::E5Large),
             (
                 Some("e5-mean-pool-v1"),
@@ -134,6 +159,26 @@ impl ModelChoice {
                 Some("granite-r2-cls-512-v1"),
                 Some("4f2842d568e2724370aec203652a42ac783c7937f8347a1a2cc7506d71f1582f"),
             ) => Some(Self::Granite97M),
+            (
+                Some("embeddinggemma-retrieval-v1"),
+                Some("4dda02faaf32bc91031dc8c88457ac272b00c1016cc679757d1c441b248b9c47"),
+            ) => Some(
+                if weights
+                    == Some("172efde319fe1542dc41f31be6154910b05b78f7a861c265c4600eec906bd6d8")
+                {
+                    Self::EmbeddingGemma300MInt8
+                } else {
+                    Self::EmbeddingGemma300M
+                },
+            ),
+            (
+                Some("gte-cls-512-v1"),
+                Some("3a56def25aa40facc030ea8b0b87f3688e4b3c39eb8b45d5702b3a1300fe2a20"),
+            ) => Some(Self::GteMultilingualBase),
+            (
+                Some("qwen3-last-token-512-v1"),
+                Some("def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"),
+            ) => Some(Self::Qwen3Embedding06BInt8),
             _ => None,
         }
     }
@@ -159,6 +204,51 @@ impl ModelChoice {
             Some(model) => model.name(),
             None => "Custom ONNX model",
         }
+    }
+
+    fn similarity_path(self) -> Option<PathBuf> {
+        config::minimum_similarity_path(self.to_possible_value()?.get_name())
+    }
+}
+
+#[derive(Clone, Copy, Default, ValueEnum, serde::Deserialize, serde::Serialize)]
+enum CaptionChoice {
+    #[default]
+    #[value(name = "florence-2")]
+    #[serde(rename = "florence-2")]
+    Florence2Base,
+    #[value(name = "florence-2-large")]
+    #[serde(rename = "florence-2-large")]
+    Florence2Large,
+}
+
+impl CaptionChoice {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Florence2Base => "Florence-2 Base FT",
+            Self::Florence2Large => "Florence-2 Large FT",
+        }
+    }
+
+    fn directory(self) -> &'static str {
+        match self {
+            Self::Florence2Base => "florence-2-base-ft",
+            Self::Florence2Large => "florence-2-large-ft",
+        }
+    }
+}
+
+#[derive(Default, serde::Deserialize, serde::Serialize)]
+struct CaptionSetting {
+    model: CaptionChoice,
+    directory: Option<PathBuf>,
+}
+
+impl std::fmt::Display for CaptionSetting {
+    fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        serde_json::to_string(self)
+            .map_err(|_| std::fmt::Error)?
+            .fmt(output)
     }
 }
 
@@ -206,6 +296,9 @@ enum Command {
     },
     /// Rebuild the saved passages with the selected embedding model.
     Reindex {
+        /// Reread images from registered folders with the selected image model.
+        #[arg(long)]
+        refresh_images: bool,
         /// Report model execution providers as JSON on stderr.
         #[arg(long)]
         runtime_info: bool,
@@ -254,11 +347,28 @@ enum GpuSetup {
 
 #[derive(Subcommand)]
 enum Setting {
+    /// Show or save the Florence-2 model used when generating image captions.
+    CaptionModel {
+        #[arg(value_name = "MODEL")]
+        choice: Option<CaptionChoice>,
+        /// Use a checkpoint downloaded to a specific local directory.
+        #[arg(long, requires = "choice")]
+        directory: Option<PathBuf>,
+    },
     /// Show or save the background model timeout in seconds.
     DaemonIdleSeconds {
         seconds: Option<NonZeroU32>,
         /// Restore the built-in default.
         #[arg(long, conflicts_with = "seconds")]
+        reset: bool,
+    },
+    /// Show or save a model-specific semantic cutoff. Omit the value to show the override.
+    MinimumSimilarity {
+        /// A cosine similarity from -1 to 1, or off.
+        #[arg(allow_negative_numbers = true)]
+        value: Option<SimilarityThreshold>,
+        /// Restore the model's built-in cutoff.
+        #[arg(long, conflicts_with = "value")]
         reset: bool,
     },
 }
@@ -292,6 +402,9 @@ struct Search {
     /// Skip reading or saving the last search's embedding.
     #[arg(long)]
     no_cache: bool,
+    /// Override the semantic cutoff for this search with a value from -1 to 1, or off.
+    #[arg(long, allow_negative_numbers = true, value_name = "SCORE")]
+    minimum_similarity: Option<SimilarityThreshold>,
     /// Read one query per line from stdin and write one JSON result array per query.
     #[arg(long, conflicts_with = "query")]
     stdin: bool,
@@ -517,6 +630,33 @@ fn print_localized_help(error: clap::Error, messages: &Messages) -> ! {
     std::process::exit(status)
 }
 
+fn configure_similarity(
+    model: ModelChoice,
+    value: Option<SimilarityThreshold>,
+    reset: bool,
+    output: &mut impl Write,
+    messages: &Messages,
+) -> Result<()> {
+    let path = model
+        .similarity_path()
+        .context(messages.config_dir_missing)?;
+    let value = if let Some(value) = value {
+        config::save_setting(&path, value)?;
+        Some(value)
+    } else if reset {
+        config::reset_setting(&path)?;
+        None
+    } else {
+        config::read_minimum_similarity(&path)?
+    };
+    if let Some(value) = value {
+        writeln!(output, "{value}")?;
+    } else {
+        writeln!(output, "default")?;
+    }
+    Ok(())
+}
+
 fn run(
     cli: Cli,
     output: &mut impl Write,
@@ -539,17 +679,51 @@ fn run(
         );
     }
     if let Some(Command::Config {
+        setting: Setting::CaptionModel { choice, directory },
+    }) = &cli.command
+    {
+        let path = config::caption_model_path().context(messages.config_dir_missing)?;
+        let setting = if let Some(model) = choice {
+            let directory = directory.as_ref().map(std::path::absolute).transpose()?;
+            if let Some(path) = &directory {
+                ensure!(
+                    FlorenceCaptioner::files_present(path),
+                    "missing Florence-2 files in {}",
+                    path.display()
+                );
+            }
+            let setting = CaptionSetting {
+                model: *model,
+                directory,
+            };
+            config::save_setting(&path, &setting)?;
+            setting
+        } else {
+            config::read_caption_model()?.unwrap_or_default()
+        };
+        writeln!(
+            output,
+            "{}",
+            setting
+                .model
+                .to_possible_value()
+                .expect("caption choice")
+                .get_name()
+        )?;
+        return Ok(());
+    }
+    if let Some(Command::Config {
         setting: Setting::DaemonIdleSeconds { seconds, reset },
     }) = cli.command
     {
         let path = config::daemon_idle_path().context(messages.config_dir_missing)?;
         let seconds = match (seconds, reset) {
             (Some(seconds), _) => {
-                config::save_daemon_idle(&path, seconds)?;
+                config::save_setting(&path, seconds)?;
                 seconds
             }
             (None, true) => {
-                config::reset_daemon_idle(&path)?;
+                config::reset_setting(&path)?;
                 DEFAULT_DAEMON_IDLE_SECONDS
             }
             (None, false) => {
@@ -559,6 +733,15 @@ fn run(
         writeln!(output, "{seconds}")?;
         return Ok(());
     }
+    if let (
+        Some(Command::Config {
+            setting: Setting::MinimumSimilarity { value, reset },
+        }),
+        Some(model),
+    ) = (&cli.command, cli.model)
+    {
+        return configure_similarity(model, *value, *reset, output, messages);
+    }
     #[cfg(not(target_os = "linux"))]
     let _ = idle_override;
     #[cfg(target_os = "linux")]
@@ -567,6 +750,7 @@ fn run(
     }
     let mut gpu_hint = GpuHint {
         pending: !cli.no_gpu_hint,
+        torch: false,
         messages,
     };
     let dir = match cli.index_dir {
@@ -575,6 +759,21 @@ fn run(
     };
     let mut index =
         Index::open(&dir).with_context(|| format!("{} {}", messages.open_index, dir.display()))?;
+    let recorded_model = index.embedding_model()?;
+    let similarity_model = cli.model.or_else(|| match recorded_model.as_deref() {
+        Some(identity) => ModelChoice::from_identity(identity),
+        None if cli.model_dir.is_none() => Some(ModelChoice::Granite97M),
+        None => None,
+    });
+    if let Some(Command::Config {
+        setting: Setting::MinimumSimilarity { value, reset },
+    }) = &cli.command
+    {
+        let model = similarity_model.context(
+            "select a built-in model with --model to save a threshold; use --minimum-similarity for custom searches",
+        )?;
+        return configure_similarity(model, *value, *reset, output, messages);
+    }
     if cfg!(target_os = "linux")
         && !matches!(cli.command, Some(Command::Init { .. }))
         && !index.is_initialized()?
@@ -585,8 +784,7 @@ fn run(
     }
     let selected_model = match (cli.model, &cli.model_dir) {
         (Some(choice), _) => choice,
-        (None, None) => index
-            .embedding_model()?
+        (None, None) => recorded_model
             .as_deref()
             .map_or(ModelChoice::Granite97M, ModelChoice::for_index),
         _ => ModelChoice::Granite97M,
@@ -615,13 +813,21 @@ fn run(
     } else {
         None
     };
+    let gemma2 = matches!(selected_model, ModelChoice::EmbeddingGemma2)
+        || model_directory()
+            .ok()
+            .is_some_and(|path| LocalModel::is_multimodal_checkpoint(&path));
+    gpu_hint.torch = gemma2;
     let start_model = || {
-        start_text_model(
-            &cli.python,
-            &model_directory()?,
-            device,
-            runtime_dir.as_deref(),
-        )
+        let directory = model_directory()?;
+        if gemma2 {
+            ensure!(
+                LocalModel::is_multimodal_checkpoint(&directory),
+                "missing EmbeddingGemma 2 checkpoint in {}. Download it with `semfind-download-model --model embeddinggemma-2 --setup-runtime`.",
+                directory.display()
+            );
+        }
+        start_text_model(&cli.python, &directory, device, runtime_dir.as_deref())
     };
     let cache_model_directory = || {
         if discover_gpu && matches!(device, ExecutionDevice::Auto) {
@@ -656,38 +862,65 @@ fn run(
         let _ = allow_resident;
         start_model().map(SearchModel::Local)
     };
+    let caption_setting = || -> Result<CaptionSetting> {
+        if let Some(model) = cli.caption_model {
+            Ok(CaptionSetting {
+                model,
+                directory: None,
+            })
+        } else {
+            Ok(config::read_caption_model()?.unwrap_or_default())
+        }
+    };
     let caption_directory = || -> Result<PathBuf> {
-        match &cli.caption_model_dir {
-            Some(path) => Ok(path.clone()),
-            None => Ok(data_dir(messages)?.join("model/florence-2-base-ft")),
+        let setting = caption_setting()?;
+        match cli.caption_model_dir.clone().or(setting.directory) {
+            Some(path) => Ok(path),
+            None => Ok(data_dir(messages)?
+                .join("model")
+                .join(setting.model.directory())),
         }
     };
     let allow_caption_gpu = !matches!(device, ExecutionDevice::Cpu);
+    let apply_similarity = |mut search: Search| -> Result<Search> {
+        if search.minimum_similarity.is_none()
+            && let Some(path) = similarity_model.and_then(ModelChoice::similarity_path)
+        {
+            search.minimum_similarity = config::read_minimum_similarity(&path)?;
+        }
+        Ok(search)
+    };
     match cli.command {
         Some(Command::Status { json }) => {
             let status = index.status()?;
             if json {
                 let model_name = match &status.model {
                     Some(identity) => ModelChoice::index_model_name(identity),
+                    None if gemma2 => ModelChoice::EmbeddingGemma2.name(),
                     None if cli.model_dir.is_some() => "Custom ONNX model",
                     None => selected_model.name(),
                 };
-                let caption_model_name = caption_directory()
-                    .ok()
-                    .filter(|path| FlorenceCaptioner::files_present(path))
-                    .map(|_| {
-                        if cli.caption_model_dir.is_some() {
-                            "Florence-2 (local checkpoint)"
-                        } else {
-                            "Florence-2 Base FT"
-                        }
-                    });
+                let caption_choice = (!gemma2).then(caption_setting).transpose()?;
+                let caption_model_name = caption_choice.as_ref().and_then(|setting| {
+                    caption_directory()
+                        .ok()
+                        .filter(|path| FlorenceCaptioner::files_present(path))
+                        .map(|_| {
+                            if cli.caption_model_dir.is_some() {
+                                "Florence-2 (local checkpoint)"
+                            } else {
+                                setting.model.name()
+                            }
+                        })
+                });
                 return print_json(
                     output,
                     &StatusWithModels {
                         index: status,
                         model_name,
                         caption_model_name,
+                        caption_model: caption_choice.map(|setting| setting.model),
+                        direct_images: gemma2,
                     },
                 );
             }
@@ -717,14 +950,52 @@ fn run(
             );
             writeln!(output, "{} {}", messages.root_removed, root.display())?;
         }
-        Some(Command::Reindex { runtime_info }) => {
+        Some(Command::Reindex {
+            runtime_info,
+            refresh_images,
+        }) => {
             let directory = std::path::absolute(model_directory()?)?;
             let mut model = start_model()?;
             gpu_hint.show(model.uses_cpu(), false);
-            let passages = index.rebuild_embeddings(&directory, &mut model)?;
+            let from_direct = recorded_model.as_deref().is_some_and(|identity| {
+                matches!(
+                    ModelChoice::from_identity(identity),
+                    Some(ModelChoice::EmbeddingGemma2)
+                )
+            });
+            let caption_path = (!model.supports_images() && (from_direct || refresh_images))
+                .then(caption_directory)
+                .transpose()?;
+            let mut captioner = caption_path
+                .as_deref()
+                .map(|path| {
+                    open_optional_captioner(
+                        &cli.python,
+                        path,
+                        runtime_dir.as_deref(),
+                        allow_caption_gpu,
+                    )
+                })
+                .transpose()?
+                .flatten();
+            if refresh_images && !model.supports_images() {
+                ensure!(
+                    captioner.is_some(),
+                    "download the selected Florence-2 checkpoint before refreshing image captions"
+                );
+            }
+            let passages = index.rebuild_embeddings_with_images(
+                &directory,
+                &mut model,
+                captioner.as_mut().map(|model| model as &mut _),
+                refresh_images,
+            )?;
             gpu_hint.show(model.uses_cpu(), false);
             if runtime_info {
-                report_index_runtime(&model, None);
+                report_index_runtime(
+                    &model,
+                    captioner.as_ref().and_then(FlorenceCaptioner::backend),
+                );
             }
             writeln!(output, "Rebuilt embeddings for {passages} passages.")?;
         }
@@ -741,6 +1012,7 @@ fn run(
             let mut model = start_model()?;
             #[cfg(target_os = "linux")]
             if matches!(device, ExecutionDevice::Auto)
+                && !model.supports_images()
                 && model.uses_cpu()
                 && let Some(root) = runtime_dir.as_deref()
                 && gpu_setup::offer_on_init(root, &cli.python, messages)
@@ -752,7 +1024,9 @@ fn run(
                     }
                 }
             }
-            let directory = (!no_caption_images).then(caption_directory).transpose()?;
+            let directory = (!no_caption_images && !model.supports_images())
+                .then(caption_directory)
+                .transpose()?;
             let mut captioner = match directory.as_deref() {
                 Some(path) => match open_optional_captioner(
                     &cli.python,
@@ -804,10 +1078,12 @@ fn run(
                 report_index_runtime(&model, caption_backend);
             }
             if let Some(timing) = timing {
-                eprintln!(
-                    "semfind: ONNX Runtime (startup): {}",
-                    model.initial_provider()
-                );
+                let runtime = if model.supports_images() {
+                    "PyTorch"
+                } else {
+                    "ONNX Runtime"
+                };
+                eprintln!("semfind: {runtime} (startup): {}", model.initial_provider());
                 if let Some(backend) = caption_backend {
                     eprintln!("semfind: Florence-2: {backend}");
                 }
@@ -828,7 +1104,9 @@ fn run(
             };
             let mut model = start_model()?;
             gpu_hint.show(model.uses_cpu(), false);
-            let directory = caption_images.then(caption_directory).transpose()?;
+            let directory = (caption_images && !model.supports_images())
+                .then(caption_directory)
+                .transpose()?;
             let mut captioner = directory
                 .as_deref()
                 .map(|path| {
@@ -871,9 +1149,10 @@ fn run(
             search.time |= cli.search.time;
             search.no_cache |= cli.search.no_cache;
             search.runtime_info |= cli.search.runtime_info;
+            search.minimum_similarity = search.minimum_similarity.or(cli.search.minimum_similarity);
             run_search(
                 &index,
-                search,
+                apply_similarity(search)?,
                 start_search_model,
                 cache_model_directory(),
                 output,
@@ -883,7 +1162,7 @@ fn run(
         }
         None => run_search(
             &index,
-            cli.search,
+            apply_similarity(cli.search)?,
             start_search_model,
             cache_model_directory(),
             output,
@@ -905,6 +1184,8 @@ struct StatusWithModels {
     index: Status,
     model_name: &'static str,
     caption_model_name: Option<&'static str>,
+    caption_model: Option<CaptionChoice>,
+    direct_images: bool,
 }
 
 fn report_index_runtime(model: &LocalModel, caption_backend: Option<&str>) {
@@ -913,7 +1194,9 @@ fn report_index_runtime(model: &LocalModel, caption_backend: Option<&str>) {
 }
 
 fn active_provider(provider: &str, uses_cpu: bool) -> &str {
-    if uses_cpu {
+    if uses_cpu && provider.starts_with("Torch") {
+        "TorchCPUProvider"
+    } else if uses_cpu {
         "CPUExecutionProvider"
     } else {
         provider
@@ -933,6 +1216,7 @@ fn report_runtime(embedding: Option<(&str, &str)>, caption_backend: Option<&str>
 
 struct GpuHint<'a> {
     pending: bool,
+    torch: bool,
     messages: &'a Messages,
 }
 
@@ -944,6 +1228,14 @@ impl GpuHint<'_> {
         self.pending = false;
         let mut stderr = io::stderr().lock();
         let clear = if progress_active { "\r\x1b[K" } else { "" };
+        if self.torch {
+            let _ = writeln!(
+                stderr,
+                "{clear}semfind: {}\nsemfind: PyTorch CUDA / ROCm: https://github.com/Engineer1080/semfind/blob/main/docs/models.md#pytorch-runtime",
+                self.messages.cpu_hint
+            );
+            return;
+        }
         let (cuda, migraphx) = if cfg!(target_os = "linux") {
             (
                 "semfind setup-gpu cuda\n                   ",
@@ -966,6 +1258,47 @@ fn start_text_model(
     device: ExecutionDevice,
     runtime_dir: Option<&Path>,
 ) -> Result<LocalModel> {
+    if LocalModel::is_multimodal_checkpoint(directory) {
+        let gpu_runtimes = [
+            ("florence-cuda", ExecutionDevice::Cuda),
+            ("florence-rocm", ExecutionDevice::Migraphx),
+        ];
+        if let Some(root) = runtime_dir {
+            for (name, backend) in gpu_runtimes {
+                if !matches!(device, ExecutionDevice::Auto) && device != backend {
+                    continue;
+                }
+                let interpreter = root.join(name).join("bin/python");
+                if interpreter.is_file() {
+                    let result = if matches!(device, ExecutionDevice::Auto) {
+                        LocalModel::start_gpu_with_fallback(&interpreter, directory, backend)
+                    } else {
+                        LocalModel::start_on(&interpreter, directory, backend)
+                    };
+                    match result {
+                        Ok(model) => return Ok(model),
+                        Err(error) => eprintln!("semfind: {}: {error:#}", interpreter.display()),
+                    }
+                }
+            }
+            if matches!(device, ExecutionDevice::Auto | ExecutionDevice::Cpu) {
+                // A configured interpreter can provide GPU inference even with a managed CPU runtime.
+                if matches!(device, ExecutionDevice::Auto)
+                    && let Ok(model) = LocalModel::start_on(python, directory, device)
+                {
+                    return Ok(model);
+                }
+                for name in ["florence-cpu", "florence-cuda", "florence-rocm"] {
+                    let interpreter = root.join(name).join("bin/python");
+                    if interpreter.is_file() {
+                        return LocalModel::start_on(&interpreter, directory, ExecutionDevice::Cpu);
+                    }
+                }
+            }
+        }
+        return LocalModel::start_on(python, directory, device)
+            .context("set up PyTorch for EmbeddingGemma 2 (see docs/models.md)");
+    }
     if matches!(device, ExecutionDevice::Auto)
         && let Some(runtime_dir) = runtime_dir
     {
@@ -1098,6 +1431,7 @@ fn run_search(
         category: search.category.map(Into::into),
         distro: Some(selected_distro),
         include_local_commands: selected_distro == local_distro,
+        minimum_similarity: search.minimum_similarity,
         limit: search.limit as usize,
     };
     let mut model = None;

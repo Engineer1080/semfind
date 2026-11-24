@@ -32,7 +32,7 @@ pub trait ImageCaptioner {
     fn caption(&mut self, image: &[u8]) -> Result<Option<String>>;
 }
 
-/// Local Florence-2 Base caption generation. The worker is started on the first image.
+/// Local Florence-2 caption generation. The worker is started on the first image.
 pub struct FlorenceCaptioner<'a> {
     python: &'a Path,
     directory: &'a Path,
@@ -132,7 +132,10 @@ impl<'a> FlorenceCaptioner<'a> {
             directory,
             runtime_dir,
             allow_gpu,
-            identity: format!("florence-2-detailed-caption-v1:{:x}", digest.finalize()),
+            identity: format!(
+                "florence-2-more-detailed-caption-v1:{:x}",
+                digest.finalize()
+            ),
             worker: None,
         })
     }
@@ -171,6 +174,15 @@ impl<'a> FlorenceCaptioner<'a> {
         let mut result = CaptionWorker::start(preferred, self.directory, "cpu");
         if result.is_err() && preferred != self.python {
             result = CaptionWorker::start(self.python, self.directory, "cpu");
+        }
+        let cpu = self
+            .runtime_dir
+            .map(|root| root.join("florence-cpu/bin/python"));
+        if result.is_err()
+            && let Some(python) =
+                cpu.filter(|path| path.is_file() && path != preferred && path != self.python)
+        {
+            result = CaptionWorker::start(&python, self.directory, "cpu");
         }
         for (python, _) in self.gpu_runtimes() {
             if result.is_ok() {

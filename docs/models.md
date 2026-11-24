@@ -2,7 +2,19 @@
 
 ## Choose an embedding model
 
-The CLI and downloader accept `granite-97m`, `granite-311m`, `e5-small`, and `e5-large` with `--model` or `SEMFIND_MODEL`. Granite 97M is the default for new indexes. Compare the models in the [retrieval benchmark](../benchmarks/retrieval/README.md).
+The CLI and downloader accept these models with `--model` or `SEMFIND_MODEL`. Granite 97M is the default for new indexes.
+
+| Model | `--model` | Default minimum similarity |
+| --- | --- | ---: |
+| Granite 97M Multilingual R2 | `granite-97m` | 0.80 |
+| Granite 311M Multilingual R2 | `granite-311m` | 0.82 |
+| E5 Small | `e5-small` | 0.80 |
+| E5 Large | `e5-large` | 0.78 |
+| EmbeddingGemma 300M FP32 | `embeddinggemma-300m` | 0.30 |
+| EmbeddingGemma 300M INT8 | `embeddinggemma-300m-int8` | 0.30 |
+| EmbeddingGemma 2 (text and images) | `embeddinggemma-2` | 0.68 for text |
+| GTE Multilingual Base FP32 | `gte-multilingual-base` | 0.58 |
+| Qwen3 Embedding 0.6B INT8 | `qwen3-embedding-0.6b-int8` | 0.40 |
 
 ```bash
 export SEMFIND_MODEL=granite-311m
@@ -14,6 +26,10 @@ semfind 'How do I find files modified today?'
 
 E5 Small also has an INT8 variant for compatible CPUs. Download it with `python scripts/download_model.py --model e5-small --variant int8`. Use a separate model and index directory when you want to keep multiple variants.
 
+Select a model in **Manage index → Switch Model** or download it with `semfind-download-model --model NAME` after installing the Debian package. EmbeddingGemma's verified ONNX downloads take about 1.25 GB for FP32 or 330 MB for INT8. Use is subject to the [Gemma Terms of Use](https://ai.google.dev/gemma/terms). [ONNX model and tokenizer](https://huggingface.co/onnx-community/embeddinggemma-300m-ONNX/tree/5090578d9565bb06545b4552f76e6bc2c93e4a66)
+
+GTE uses the [ONNX Community FP32 export](https://huggingface.co/onnx-community/gte-multilingual-base). Qwen3 uses the [Qdrant INT8 export](https://huggingface.co/Qdrant/Qwen3-Embedding-0.6B-onnx), which requires ONNX Runtime 1.23 or later.
+
 Without an explicit model selection, Semfind uses the built-in model recorded for an existing index. Keep the model directory available for the weights and tokenizer used to create the index. A custom model still requires its configured directory.
 
 To replace the current index's model, download the new model and use `reindex`. For example, to switch an existing E5 index to Granite 97M after installing Semfind through APT:
@@ -23,7 +39,20 @@ semfind-download-model --model granite-97m
 semfind reindex --model granite-97m
 ```
 
-`reindex` replaces the vectors for saved passages, including image descriptions, and records the selected model directory in the same transaction. Searches and later scans use that directory by default. Update or unset any old `SEMFIND_MODEL` or `SEMFIND_MODEL_DIR` override in your shell. Use `semfind init --force` to rebuild with a full scan of the home directory and registered folders. Search and incremental indexing reject a model whose embedding identity differs from the recorded identity. To keep both models in use, give each a separate index directory as shown above.
+`reindex` replaces the vectors for saved passages and records the selected model directory in the same transaction. Switching to or from EmbeddingGemma 2 also rereads images in registered folders. Connect any offline indexed folders before switching. Searches and later scans use that directory by default. Update or unset any old `SEMFIND_MODEL` or `SEMFIND_MODEL_DIR` override in your shell. Use `semfind init --force` to rebuild with a full scan of the home directory and registered folders. Search and incremental indexing reject a model whose embedding identity differs from the recorded identity. To keep both models in use, give each a separate index directory as shown above.
+
+## Change the similarity threshold
+
+Save a different minimum cosine similarity for a built-in model. The setting applies to future searches that use that model. Omit `--model` to select the model recorded for the current index, or Granite 97M for a new index.
+
+```bash
+semfind config minimum-similarity 0.82 --model granite-97m
+semfind config minimum-similarity --model granite-97m
+semfind config minimum-similarity off --model granite-97m
+semfind config minimum-similarity --reset --model granite-97m
+```
+
+Use a value between `-1` and `1`, or `off` to disable the semantic cutoff. The command prints the saved override or `default` when the model's default applies. Override the saved value for one search with `semfind "query" --minimum-similarity 0.75`. The same flag works with `search --stdin` and custom models. Threshold changes take effect without reindexing. They filter semantic matches, while keyword matches stay eligible.
 
 ## Use your own model
 
@@ -46,34 +75,53 @@ Changes to the weights, tokenizer, or encoding settings require a full rebuild o
 
 ## Search images by subject
 
-Once Florence-2 is set up locally, `semfind init` automatically generates English descriptions of supported JPEG, PNG, and WebP files in your home directory. Semfind indexes the captions as text alongside document passages. The same search can return both, while `--kind image` limits it to pictures. Semfind includes the generated description in the result snippet.
-
-From the repository root, add the optional dependencies to the Python environment selected during setup. The [Florence-2 Base FT checkpoint](https://huggingface.co/florence-community/Florence-2-base-ft) download is about 470 MB.
+With the default Granite 97M setup, Florence-2 Base FT describes supported JPEG, PNG, and WebP images in English. Semfind uses Florence's `<MORE_DETAILED_CAPTION>` prompt and indexes the descriptions alongside documents with the active embedding model. Download Base (about 470 MB) once to enable captioning in `semfind init`. You can use `--kind image` to limit a search to pictures.
 
 ```bash
-"$SEMFIND_PYTHON" -m pip install 'torch==2.14.1' 'torchvision==0.29.1' --index-url https://download.pytorch.org/whl/cpu
-"$SEMFIND_PYTHON" -m pip install 'transformers==5.23.0' 'Pillow==13.0.0'
-"$SEMFIND_PYTHON" scripts/download_model.py --model florence-2
+semfind-download-model --model florence-2 --setup-runtime
 semfind init
-semfind "Katze auf dem Sofa" --json
 semfind "Katze auf dem Sofa" --kind image --json
 ```
 
-Florence-2 runs locally and automatically uses a compatible PyTorch GPU when available. Semfind tries dedicated runtimes in `runtime/florence-cuda` and `runtime/florence-rocm` under the Semfind data directory, then checks the configured Python environment. If GPU captioning fails, Semfind retries on the CPU. `--device cpu` forces CPU captioning, and `--python` uses the chosen interpreter for device detection. `semfind init --time` reports the Florence-2 backend separately when it generates captions.
+From a source checkout, replace `semfind-download-model` with `python3 scripts/download_model.py`. On an existing index, the next scan with captioning regenerates descriptions when the checkpoint or caption recipe changes. To explicitly refresh images in all registered folders, run `semfind reindex --refresh-images`.
 
-The [GPU setup guide](gpu.md) covers text embeddings. For image captioning on an NVIDIA GPU with a CUDA 13-capable driver, create a dedicated Florence-2 runtime.
+Florence-2 Large FT (about 1.54 GB) is optional. It uses the same prompt and can improve photo retrieval at higher indexing cost. Select **Manage index → Image model** in the desktop app, or use these commands.
 
 ```bash
-florence_runtime="${XDG_DATA_HOME:-$HOME/.local/share}/semfind/runtime/florence-cuda"
-python3 -m venv "$florence_runtime"
-"$florence_runtime/bin/python" -m pip install 'torch==2.14.1' 'torchvision==0.29.1' --index-url https://download.pytorch.org/whl/cu130
-"$florence_runtime/bin/python" -m pip install 'transformers==5.23.0' 'Pillow==13.0.0'
+semfind-download-model --model florence-2-large --setup-runtime
+semfind config caption-model florence-2-large
+semfind reindex --refresh-images
 ```
 
-For AMD GPUs, use a [PyTorch ROCm build](https://pytorch.org/get-started/locally/) in `runtime/florence-rocm` and install the same Transformers and Pillow dependencies. The Florence-2 checkpoint is shared between backends.
+Use `semfind config caption-model florence-2` to restore Base. Use `--caption-model florence-2-large` for one invocation, `--caption-model-dir` for a local checkpoint, or `semfind index ROOT --caption-images` to caption images in one folder. With a Florence setup, `semfind init --no-caption-images` skips new captions for that run and keeps existing ones. If Florence is unavailable during regular `init`, new images are indexed by filename and path.
 
-In a local check with Florence-2 Base FT, the median time to describe one repeated test image after warmup was 3.01 s on a Ryzen 7 5800X3D and 0.15 s on a GeForce RTX 4080 SUPER with CUDA. Both backends produced the same description for that image. The timing excludes model startup and index updates. ROCm still needs hardware verification.
+## Use EmbeddingGemma 2 for text and images
 
-The first run can take longer for large photo collections. Subsequent scans generate captions for new or changed images, or when the caption model changes. If Florence-2 is unavailable during `init`, Semfind keeps the captions it already has and indexes new images by filename and path. Use `semfind init --no-caption-images` to skip captioning for one run.
+EmbeddingGemma 2 (about 1.53 GB) embeds documents, app and command descriptions, desktop settings, images, and search queries in one shared space. It loads one encoder for a mixed search. Images have vectors and searchable filenames. Florence is only needed for caption-based indexing with a text model. EmbeddingGemma 2 is subject to the [Gemma Terms of Use](https://ai.google.dev/gemma/terms).
 
-Use `semfind index ROOT --caption-images` to explicitly caption images in a separate indexed root. Use `SEMFIND_CAPTION_MODEL_DIR` or `--caption-model-dir` for another local checkpoint directory. Deleting an image or unindexing its root removes its caption. Unreadable image contents fall back to filename and path search when the file itself remains accessible. Caption extraction limits images to 16 MiB and 40 million pixels.
+```bash
+semfind-download-model --model embeddinggemma-2 --setup-runtime
+semfind --model embeddinggemma-2 reindex
+semfind "Katze auf dem Sofa" --json
+```
+
+On a fresh index, run `semfind --model embeddinggemma-2 init` instead. Direct image indexing is also active for `semfind index ROOT`. To switch back, run `semfind --model granite-97m reindex`. If Florence is set up, the switch restores captions for supported images.
+
+The built-in 0.68 similarity cutoff was calibrated for text. Direct image matches use cosine ranking without a default cutoff. A configured or per-search `--minimum-similarity` applies to both. Both image pipelines accept JPEG, PNG, and WebP up to 16 MiB and 40 million pixels. Other image types and unreadable image contents can be found by filename and path.
+
+## PyTorch runtime
+
+`--setup-runtime` reuses a compatible local PyTorch environment or sets up a CPU runtime in Semfind's user data directory. It requires Python with venv support. The desktop app can run this setup when you choose a vision model.
+
+Both Florence-2 and EmbeddingGemma 2 can use PyTorch CUDA or ROCm. Semfind discovers `runtime/florence-cuda` and `runtime/florence-rocm` under its data directory and can fall back to CPU. `--device cpu` forces CPU inference. For EmbeddingGemma 2, `--device migraphx` selects PyTorch ROCm, and `--runtime-info` reports the actual provider. The [ONNX GPU setup guide](gpu.md) applies to the ONNX models.
+
+For NVIDIA with a CUDA 13-capable driver, create a dedicated PyTorch environment.
+
+```bash
+torch_runtime="${XDG_DATA_HOME:-$HOME/.local/share}/semfind/runtime/florence-cuda"
+python3 -m venv "$torch_runtime"
+"$torch_runtime/bin/python" -m pip install 'torch==2.14.1' 'torchvision==0.29.1' --index-url https://download.pytorch.org/whl/cu130
+"$torch_runtime/bin/python" -m pip install 'transformers==5.23.0' 'Pillow==13.0.0'
+```
+
+For AMD, use a [PyTorch ROCm build](https://pytorch.org/get-started/locally/) in `runtime/florence-rocm` with the same Transformers and Pillow dependencies.

@@ -30,6 +30,9 @@ HIT_LABELS = {
 RUNTIME_PREFIX = "semfind: runtime "
 DEVICES = {
     "CPUExecutionProvider": "CPU",
+    "TorchCPUProvider": "CPU (PyTorch)",
+    "TorchCUDAProvider": "CUDA (PyTorch)",
+    "TorchROCmProvider": "ROCm (PyTorch)",
     "CUDAExecutionProvider": "CUDA (GPU)",
     "MIGraphXExecutionProvider": "MIGraphX (GPU)",
     "CPU": "CPU",
@@ -39,6 +42,11 @@ DEVICES = {
 EMBEDDING_MODELS = (
     ("granite-97m", "Granite 97M Multilingual R2"),
     ("granite-311m", "Granite 311M Multilingual R2"),
+    ("embeddinggemma-2", "EmbeddingGemma 2"),
+    ("embeddinggemma-300m", "EmbeddingGemma 300M"),
+    ("embeddinggemma-300m-int8", "EmbeddingGemma 300M (INT8)"),
+    ("gte-multilingual-base", "GTE Multilingual Base (FP32)"),
+    ("qwen3-embedding-0.6b-int8", "Qwen3 Embedding 0.6B (INT8)"),
     ("e5-small", "E5 Small"),
     ("e5-large", "E5 Large"),
     (None, "Custom ONNX model"),
@@ -282,12 +290,17 @@ class SearchWindow(Gtk.ApplicationWindow):
         file_label = "file" if files == 1 else "files"
         root_label = "folder" if roots == 1 else "folders"
         self.index_summary.set_label(f"{files:,} {file_label} · {roots} {root_label}")
-        self.embedding_name.set_label(self.status.get("model_name", "Model name unavailable"))
+        name = self.status.get("model_name", "Model name unavailable")
+        if self.status.get("direct_images"):
+            name += " · Text and images"
+        self.embedding_name.set_label(name)
         if self.last_embedding and self.last_embedding[0] != self.status.get("model"):
             self.last_embedding = None
             self.cached_query = False
         caption_name = self.status.get("caption_model_name")
-        self.caption_summary.set_visible("caption_model_name" in self.status)
+        self.caption_summary.set_visible(
+            "caption_model_name" in self.status and not self.status.get("direct_images")
+        )
         self.caption_name.set_label(caption_name or "Not set up")
         self.caption_device.set_visible(bool(caption_name))
         if not caption_name:
@@ -544,6 +557,8 @@ class SearchWindow(Gtk.ApplicationWindow):
 
         buttons = box(8)
         buttons.append(button("Switch Model", lambda: self.switch_model(dialog), "quiet"))
+        if self.status.get("caption_model"):
+            buttons.append(button("Image model", lambda: self.switch_caption_model(dialog), "quiet"))
         buttons.append(button("Index home", lambda: self.index_home(dialog), "quiet"))
         buttons.append(button("Choose folder", lambda: self.choose_folder(dialog), "primary"))
         container.append(buttons)
@@ -564,12 +579,15 @@ class SearchWindow(Gtk.ApplicationWindow):
         content.append(label(f"Current model · {current_name}", "card-title", wrap=True))
         names = [name for _, name in EMBEDDING_MODELS]
         choices = Gtk.DropDown.new_from_strings(names)
-        current_choice = current_name.removesuffix(" (INT8)")
+        current_choice = "E5 Small" if current_name == "E5 Small (INT8)" else current_name
         choices.set_selected(names.index(current_choice) if current_choice in names else 0)
         choices.update_property([Gtk.AccessibleProperty.LABEL], ["Embedding model"])
         content.append(choices)
         hint = label("", "muted", wrap=True)
         content.append(hint)
+        terms = Gtk.LinkButton.new_with_label("https://ai.google.dev/gemma/terms", "Gemma Terms of Use")
+        terms.set_halign(Gtk.Align.START)
+        content.append(terms)
 
         def prepare():
             model, name = EMBEDDING_MODELS[choices.get_selected()]
@@ -602,10 +620,18 @@ class SearchWindow(Gtk.ApplicationWindow):
         content.append(actions)
 
         def update_choice(*_args):
-            custom = EMBEDDING_MODELS[choices.get_selected()][0] is None
+            model = EMBEDDING_MODELS[choices.get_selected()][0]
+            custom = model is None
+            gemma_download = {
+                "embeddinggemma-2": "1.53 GB",
+                "embeddinggemma-300m": "1.25 GB",
+                "embeddinggemma-300m-int8": "330 MB",
+            }.get(model)
             primary.set_label("Choose folder…" if custom else "Download")
+            terms.set_visible(gemma_download is not None)
             hint.set_label(
                 "Use a local ONNX model and tokenizer with a Semfind model config." if custom else
+                f"Downloads about {gemma_download}. Use is subject to the Gemma Terms of Use." if gemma_download else
                 "Semfind keeps your current model and reuses any verified files for the selected one."
             )
 
@@ -613,7 +639,30 @@ class SearchWindow(Gtk.ApplicationWindow):
         update_choice()
         dialog.present()
 
-    def prepare_model(self, model, name):
+    def switch_caption_model(self, manage_dialog):
+        manage_dialog.close()
+        options = (
+            ("florence-2", "Florence-2 Base FT"),
+            ("florence-2-large", "Florence-2 Large FT"),
+        )
+        dialog = Gtk.AlertDialog(
+            message="Choose an image caption model",
+            detail="Base is the default (470 MB). Large (1.54 GB) can improve photo matches and takes longer "
+                   "to index. Semfind sets up PyTorch if needed.",
+            buttons=["Cancel", *(name for _, name in options)], cancel_button=0,
+        )
+
+        def chosen(dialog, result):
+            try:
+                choice = dialog.choose_finish(result)
+            except GLib.Error:
+                return
+            if choice in (1, 2):
+                self.prepare_model(*options[choice - 1], caption=True)
+
+        dialog.choose(self, None, chosen)
+
+    def prepare_model(self, model, name, *, caption=False):
         packaged = Path(self.cli).with_name("semfind-download-model")
         source = HERE.parents[1] / "scripts/download_model.py"
         if packaged.is_file():
@@ -624,6 +673,8 @@ class SearchWindow(Gtk.ApplicationWindow):
             self.alert("Model downloader unavailable", "Run the model downloader from your Semfind installation.")
             return
         arguments.extend(("--model", model, "--managed", "--json"))
+        if caption or model == "embeddinggemma-2":
+            arguments.append("--setup-runtime")
         if model == "e5-small" and self.status.get("model_name") == "E5 Small (INT8)":
             arguments.extend(("--variant", "int8"))
             name = "E5 Small (INT8)"
@@ -638,14 +689,42 @@ class SearchWindow(Gtk.ApplicationWindow):
                 self.feedback("The model downloader returned an unreadable response.", error=True)
                 return
             detail = "Download complete." if result.get("downloaded") else "Model files are already available."
-            self.model_ready(name, directory, detail)
+            if caption:
+                self.caption_model_ready(model, name, directory, detail)
+            else:
+                self.model_ready(name, directory, detail, direct=model == "embeddinggemma-2")
 
         self.start_job(f"Preparing {name}", lambda complete: run_process(arguments, complete), on_success=ready)
 
-    def model_ready(self, name, directory, detail):
+    def caption_model_ready(self, model, name, directory, detail):
+        def activate():
+            def activated(_output):
+                self.last_caption_backend = None
+                self.refresh_status()
+                if self.status.get("roots"):
+                    self.confirm(
+                        "Refresh indexed images?",
+                        f"Semfind will regenerate captions with {name} in your indexed folders.",
+                        "Refresh images",
+                        lambda: self.start_index_job(
+                            ["reindex", "--refresh-images", *self.runtime_options()], "Refreshing images",
+                        ),
+                    )
+
+            arguments = ["config", "caption-model", model, "--directory", directory]
+            self.start_job(f"Activating {name}", lambda complete: self.run_cli(arguments, complete),
+                           on_success=activated)
+
+        self.confirm(f"{name} is ready", detail + " Use this model for future image captions?", "Use model", activate)
+
+    def model_ready(self, name, directory, detail, *, direct=False):
         self.feedback(f"{name} is ready.")
         if self.status.get("chunks"):
-            detail += " Reindex saved passages to activate this model. Your folders and image descriptions are kept."
+            detail += " Reindex saved passages to activate this model."
+            if direct or self.status.get("direct_images"):
+                detail += " Semfind will reread images in your indexed folders."
+            else:
+                detail += " Your folders and image descriptions are kept."
             action = "Reindex"
         else:
             detail += " Use this model for the next folder or home scan."
@@ -670,7 +749,10 @@ class SearchWindow(Gtk.ApplicationWindow):
 
     def refresh_folder(self, dialog, folder):
         dialog.close()
-        self.start_index_job(["index", *self.runtime_options(), "--", folder], "Indexing the selected folder")
+        image_options = ["--caption-images"] if self.status.get("caption_model_name") else []
+        self.start_index_job(
+            ["index", *image_options, *self.runtime_options(), "--", folder], "Indexing the selected folder",
+        )
 
     def index_home(self, dialog):
         dialog.close()

@@ -121,16 +121,16 @@ impl Client {
         let ready: Ready = receive(&stream, MAX_REPLY_BYTES)?;
         Ok(Self {
             stream,
-            uses_cpu: ready.provider == "CPUExecutionProvider",
+            uses_cpu: matches!(
+                ready.provider.as_str(),
+                "CPUExecutionProvider" | "TorchCPUProvider"
+            ),
             ready,
             idle_seconds,
         })
     }
 
     pub(super) fn provider(&self) -> &str {
-        if self.ready.reused && self.uses_cpu {
-            return "CPUExecutionProvider";
-        }
         &self.ready.provider
     }
 
@@ -309,7 +309,13 @@ fn address(
     }
     if let Some(runtime) = runtime {
         hash_path(&mut hash, runtime);
-        for backend in ["cuda", "migraphx"] {
+        for backend in [
+            "cuda",
+            "migraphx",
+            "florence-cpu",
+            "florence-cuda",
+            "florence-rocm",
+        ] {
             let environment = runtime.join(backend);
             hash_path(&mut hash, &environment);
             hash_path(&mut hash, &environment.join("bin/python"));

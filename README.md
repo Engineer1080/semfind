@@ -103,7 +103,7 @@ Experimental MIGraphX support requires compatible system libraries. See the [AMD
 
 ### Search images by subject
 
-With Florence-2 set up locally, Semfind can search supported JPEG, PNG, and WebP images by their generated descriptions alongside documents. See the [image search guide](docs/models.md#search-images-by-subject).
+Semfind can search JPEG, PNG, and WebP images alongside documents. Florence-2 Base creates image descriptions by default once set up. Florence-2 Large is an optional caption model, and EmbeddingGemma 2 can embed text and images directly with one model. See the [image search guide](docs/models.md#search-images-by-subject).
 
 ### Choose an embedding model
 
@@ -111,7 +111,7 @@ Granite 97M is the default for new indexes. See the [model guide](docs/models.md
 
 ## Architecture and limits
 
-Semfind uses SQLite FTS5 and embeddings from a local ONNX Runtime worker. It combines keyword and semantic rankings. Exact vector search scales linearly with the number of indexed passages. PDF search requires a text layer. See the [architecture](docs/architecture.md) and [roadmap](docs/roadmap.md).
+Semfind uses SQLite FTS5 and embeddings from local ONNX Runtime or PyTorch workers. It combines keyword and semantic rankings. Exact vector search scales linearly with the number of indexed passages. PDF search requires a text layer. See the [architecture](docs/architecture.md) and [roadmap](docs/roadmap.md).
 
 ## Contribute
 
